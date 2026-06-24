@@ -939,7 +939,6 @@ body.llm-open .llm-panel {
     pointer-events: auto;
   }
 
-  .llm-header,
   .llm-chat,
   .llm-composer {
     padding-right: 12px;
@@ -947,33 +946,20 @@ body.llm-open .llm-panel {
   }
 
   .llm-header {
-    align-items: center;
-    padding-top: 10px;
-    padding-bottom: 10px;
-    border-bottom: 0;
-    background: transparent;
-  }
-
-  .llm-header h2 {
-    font-size: 16px;
-  }
-
-  .llm-header p {
-    font-size: 12px;
-  }
-
-  .llm-header-actions .action-button {
-    min-height: 32px;
-    padding: 0 9px;
+    display: none;
   }
 
   .llm-chat {
-    padding-top: 10px;
+    padding-top: 12px;
     padding-bottom: 10px;
     background: transparent;
   }
 
   .llm-composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 68px;
+    align-items: end;
+    gap: 8px;
     padding-top: 10px;
     padding-bottom: calc(8px + env(safe-area-inset-bottom));
     border-top: 0;
@@ -984,14 +970,11 @@ body.llm-open .llm-panel {
     max-width: 100%;
   }
 
-  .llm-prompts {
-    gap: 6px;
-    margin-bottom: 8px;
-  }
-
-  .prompt-chip {
-    min-height: 30px;
-    font-size: 13px;
+  .llm-prompts,
+  #llm-stop,
+  #llm-clear-chat,
+  .llm-status {
+    display: none;
   }
 
   .llm-composer .form-field span {
@@ -999,25 +982,27 @@ body.llm-open .llm-panel {
   }
 
   .llm-composer .form-field textarea {
-    min-height: 58px;
+    height: 44px;
+    min-height: 44px;
+    max-height: 44px;
     resize: none;
     background: transparent;
+    line-height: 1.45;
   }
 
   .llm-runbar {
-    gap: 6px;
-    margin-top: 8px;
+    display: block;
+    margin-top: 0;
   }
 
   .llm-runbar .action-button {
-    min-height: 32px;
+    width: 100%;
+    min-height: 44px;
     padding: 0 8px;
   }
 
-  .llm-status {
-    min-height: 18px;
-    margin: 6px 0 0;
-    font-size: 12px;
+  .prompt-field {
+    min-width: 0;
   }
 
   .llm-settings-dialog {
