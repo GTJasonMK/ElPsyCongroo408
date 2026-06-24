@@ -685,28 +685,31 @@ async function sendLlmMessage() {
         messages: requestMessages,
         temperature: config.temperature,
         max_tokens: config.maxTokens,
-        stream: false,
+        stream: true,
+        stream_options: {
+          include_usage: true,
+        },
       }),
       signal: state.llmAbortController.signal,
     });
 
-    const data = await readJsonResponse(response);
     if (!response.ok) {
+      const data = await readJsonResponse(response);
       throw new Error(extractApiError(data) || `${response.status} ${response.statusText}`);
     }
 
-    const content = extractCompletionContent(data);
-    if (!content) {
-      throw new Error("接口返回中没有可显示的内容。");
-    }
-
-    updateChatMessage(pendingMessage, content);
+    const result = await streamChatCompletion(response, pendingMessage);
     saveCurrentChat();
-    setLlmStatus(formatUsage(data.usage));
+    setLlmStatus(formatUsage(result.usage));
   } catch (error) {
     if (error.name === "AbortError") {
-      setLlmStatus("已停止分析。");
-      removeChatMessage(pendingMessage);
+      if (hasGeneratedContent(pendingMessage)) {
+        updateChatMessage(pendingMessage, pendingMessage.content);
+        setLlmStatus("已停止，当前输出已保留。");
+      } else {
+        setLlmStatus("已停止分析。");
+        removeChatMessage(pendingMessage);
+      }
     } else {
       updateChatMessage(pendingMessage, `请求失败：${error.message}`);
       setLlmStatus(formatLlmError(error), "error");
@@ -720,6 +723,110 @@ async function sendLlmMessage() {
 
 function stopLlmAnalysis() {
   state.llmAbortController?.abort();
+}
+
+async function streamChatCompletion(response, pendingMessage) {
+  if (!response.body) {
+    throw new Error("当前浏览器不支持流式响应。");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let usage = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const blocks = buffer.split(/\r?\n\r?\n/);
+    buffer = blocks.pop() || "";
+
+    for (const block of blocks) {
+      const result = handleStreamBlock(block, pendingMessage, content, usage);
+      content = result.content;
+      usage = result.usage;
+    }
+
+    if (done) {
+      break;
+    }
+  }
+
+  if (buffer.trim()) {
+    const result = handleStreamBlock(buffer, pendingMessage, content, usage);
+    content = result.content;
+    usage = result.usage;
+  }
+
+  if (!content.trim()) {
+    throw new Error("接口返回中没有可显示的内容。");
+  }
+
+  updateChatMessage(pendingMessage, content);
+  return { content, usage };
+}
+
+function handleStreamBlock(block, pendingMessage, currentContent, currentUsage) {
+  let content = currentContent;
+  let usage = currentUsage;
+
+  for (const payload of extractStreamPayloads(block)) {
+    if (payload === "[DONE]") {
+      continue;
+    }
+
+    const chunk = parseStreamPayload(payload);
+    const apiError = extractApiError(chunk);
+    if (apiError) {
+      throw new Error(apiError);
+    }
+
+    usage = chunk.usage || usage;
+    const delta = extractStreamDelta(chunk);
+    if (!delta) {
+      continue;
+    }
+
+    content += delta;
+    updateChatMessage(pendingMessage, content, { renderMarkdown: false });
+  }
+
+  return { content, usage };
+}
+
+function extractStreamPayloads(block) {
+  const lines = block.split(/\r?\n/);
+  const dataLines = lines
+    .map((line) => line.trimEnd())
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart());
+
+  if (dataLines.length) {
+    return dataLines.filter(Boolean);
+  }
+
+  const trimmed = block.trim();
+  return trimmed ? [trimmed] : [];
+}
+
+function parseStreamPayload(payload) {
+  try {
+    return JSON.parse(payload);
+  } catch {
+    throw new Error("流式响应包含无法解析的 JSON。");
+  }
+}
+
+function extractStreamDelta(chunk) {
+  const choice = chunk?.choices?.[0];
+  const delta = choice?.delta;
+  const content = delta?.content ?? delta?.refusal ?? choice?.text ?? chunk?.output_text;
+  return typeof content === "string" ? content : "";
+}
+
+function hasGeneratedContent(message) {
+  return Boolean(message.content && message.content !== "正在生成...");
 }
 
 function buildChatCompletionsUrl(baseUrl) {
@@ -850,7 +957,7 @@ function appendChatMessage(role, content) {
   return message;
 }
 
-function updateChatMessage(message, content) {
+function updateChatMessage(message, content, options = {}) {
   message.content = content;
   const bubble = elements.llmChatMessages.querySelector(`[data-message-id="${message.id}"]`);
   if (!bubble) {
@@ -858,7 +965,11 @@ function updateChatMessage(message, content) {
     return;
   }
   const body = bubble.querySelector(".chat-message-body");
-  renderMarkdownInto(body, content);
+  if (options.renderMarkdown === false) {
+    body.textContent = content;
+  } else {
+    renderMarkdownInto(body, content);
+  }
   scrollChatToBottom();
 }
 
@@ -967,11 +1078,16 @@ function formatUsage(usage) {
   if (!usage) {
     return "完成。";
   }
-  const total = usage.total_tokens ? `总 token ${usage.total_tokens}` : "";
-  const cached = usage.prompt_tokens_details?.cached_tokens
-    ? `缓存命中 ${usage.prompt_tokens_details.cached_tokens}`
-    : "";
-  return [total, cached].filter(Boolean).join("，") || "完成。";
+  const total = formatTokenUsagePart("总 token", usage.total_tokens);
+  const cachedTokens = usage.prompt_cache_hit_tokens ?? usage.prompt_tokens_details?.cached_tokens;
+  const cacheMissTokens = usage.prompt_cache_miss_tokens;
+  const cached = formatTokenUsagePart("缓存命中", cachedTokens);
+  const missed = formatTokenUsagePart("未命中", cacheMissTokens);
+  return [total, cached, missed].filter(Boolean).join("，") || "完成。";
+}
+
+function formatTokenUsagePart(label, value) {
+  return typeof value === "number" && Number.isFinite(value) ? `${label} ${value}` : "";
 }
 
 function setLlmBusy(isBusy) {
