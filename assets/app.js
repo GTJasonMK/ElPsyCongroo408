@@ -96,6 +96,8 @@ const state = {
   expandedDirs: new Set(),
   llmChatMessages: [],
   llmAbortController: null,
+  llmPendingRender: null,
+  llmRenderFrame: 0,
   manifest: null,
   query: "",
   selectedDoc: null,
@@ -821,6 +823,7 @@ async function sendLlmMessage() {
     saveCurrentChat();
     setLlmStatus(formatUsage(result.usage));
   } catch (error) {
+    cancelScheduledChatRender();
     if (error.name === "AbortError") {
       if (hasGeneratedContent(pendingMessage)) {
         updateChatMessage(pendingMessage, pendingMessage.content);
@@ -882,6 +885,7 @@ async function streamChatCompletion(response, pendingMessage) {
     throw new Error("接口返回中没有可显示的内容。");
   }
 
+  cancelScheduledChatRender();
   updateChatMessage(pendingMessage, content);
   return { content, usage };
 }
@@ -908,7 +912,7 @@ function handleStreamBlock(block, pendingMessage, currentContent, currentUsage) 
     }
 
     content += delta;
-    updateChatMessage(pendingMessage, content, { renderMarkdown: false });
+    scheduleChatMessageRender(pendingMessage, content);
   }
 
   return { content, usage };
@@ -1076,7 +1080,34 @@ function appendChatMessage(role, content) {
   return message;
 }
 
-function updateChatMessage(message, content, options = {}) {
+function scheduleChatMessageRender(message, content) {
+  message.content = content;
+  state.llmPendingRender = { message, content };
+  if (state.llmRenderFrame) {
+    return;
+  }
+
+  state.llmRenderFrame = requestAnimationFrame(flushScheduledChatRender);
+}
+
+function flushScheduledChatRender() {
+  const pendingRender = state.llmPendingRender;
+  state.llmRenderFrame = 0;
+  state.llmPendingRender = null;
+  if (pendingRender) {
+    updateChatMessage(pendingRender.message, pendingRender.content);
+  }
+}
+
+function cancelScheduledChatRender() {
+  if (state.llmRenderFrame) {
+    cancelAnimationFrame(state.llmRenderFrame);
+  }
+  state.llmRenderFrame = 0;
+  state.llmPendingRender = null;
+}
+
+function updateChatMessage(message, content) {
   message.content = content;
   const bubble = elements.llmChatMessages.querySelector(`[data-message-id="${message.id}"]`);
   if (!bubble) {
@@ -1084,11 +1115,7 @@ function updateChatMessage(message, content, options = {}) {
     return;
   }
   const body = bubble.querySelector(".chat-message-body");
-  if (options.renderMarkdown === false) {
-    body.textContent = content;
-  } else {
-    renderMarkdownInto(body, content);
-  }
+  renderMarkdownInto(body, content);
   scrollChatToBottom();
 }
 
