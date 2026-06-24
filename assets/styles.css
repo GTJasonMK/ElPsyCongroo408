@@ -487,6 +487,12 @@ a {
   display: none;
 }
 
+.llm-scrim[hidden],
+.llm-panel[hidden],
+.llm-settings-dialog[hidden] {
+  display: none !important;
+}
+
 .llm-scrim {
   position: fixed;
   inset: 0;
@@ -794,6 +800,10 @@ body.llm-open .llm-panel {
 }
 
 .llm-settings-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 95;
   width: min(680px, calc(100vw - 32px));
   max-height: min(780px, calc(100vh - 32px));
   padding: 0;
@@ -802,6 +812,7 @@ body.llm-open .llm-panel {
   background: #fbfcfa;
   color: var(--text);
   box-shadow: var(--shadow);
+  transform: translate(-50%, -50%);
 }
 
 .llm-settings-dialog::backdrop {

@@ -51,9 +51,9 @@
       </div>
     </div>
     <button class="scrim" id="scrim" type="button" aria-label="关闭目录"></button>
-    <button class="llm-scrim" id="llm-scrim" type="button" aria-label="关闭 AI 对话"></button>
+    <button class="llm-scrim" id="llm-scrim" type="button" aria-label="关闭 AI 对话" hidden></button>
     <button class="llm-fab" id="llm-fab" type="button" aria-label="打开 AI 对话" title="打开 AI 对话">AI</button>
-    <section class="llm-panel" id="llm-panel" aria-label="AI 对话" aria-hidden="true">
+    <section class="llm-panel" id="llm-panel" aria-label="AI 对话" aria-hidden="true" hidden>
       <header class="llm-header">
         <div>
           <h2>当前文档对话</h2>
@@ -90,7 +90,7 @@
       </footer>
     </section>
 
-    <dialog class="llm-settings-dialog" id="llm-settings-dialog" aria-label="AI 设置">
+    <dialog class="llm-settings-dialog" id="llm-settings-dialog" aria-label="AI 设置" hidden>
       <form class="llm-config" id="llm-config-form" method="dialog">
         <header class="settings-header">
           <h2>AI 设置</h2>

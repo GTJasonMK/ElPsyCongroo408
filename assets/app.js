@@ -577,6 +577,8 @@ function clampNumber(value, min, max, fallback) {
 
 function openLlmPanel() {
   closeSidebar();
+  elements.llmPanel.hidden = false;
+  elements.llmScrim.hidden = false;
   document.body.classList.add("llm-open");
   elements.llmPanel.setAttribute("aria-hidden", "false");
   elements.llmMessageInput.focus();
@@ -585,17 +587,26 @@ function openLlmPanel() {
 function closeLlmPanel() {
   document.body.classList.remove("llm-open");
   elements.llmPanel.setAttribute("aria-hidden", "true");
+  elements.llmPanel.hidden = true;
+  elements.llmScrim.hidden = true;
 }
 
 function openLlmSettings() {
-  if (!elements.llmSettingsDialog.open) {
+  elements.llmSettingsDialog.hidden = false;
+  if (typeof elements.llmSettingsDialog.showModal === "function" && !elements.llmSettingsDialog.open) {
     elements.llmSettingsDialog.showModal();
+  } else {
+    elements.llmSettingsDialog.setAttribute("open", "");
   }
   elements.llmBaseUrl.focus();
 }
 
 function closeLlmSettings() {
-  elements.llmSettingsDialog.close();
+  if (typeof elements.llmSettingsDialog.close === "function" && elements.llmSettingsDialog.open) {
+    elements.llmSettingsDialog.close();
+  }
+  elements.llmSettingsDialog.removeAttribute("open");
+  elements.llmSettingsDialog.hidden = true;
 }
 
 function setPromptTemplate(name, options = {}) {
