@@ -6,6 +6,7 @@ const MANIFEST_URL = "./docs-manifest.json";
 const EXTERNAL_LINK_RE = /^(https?:|mailto:|tel:)/i;
 const LLM_CONFIG_KEY = "elpsy-docs.llm.config.v1";
 const LLM_CHAT_KEY_PREFIX = "elpsy-docs.llm.chat.v1:";
+const LLM_CHAT_STORAGE_VERSION = 2;
 const CHAT_BOTTOM_THRESHOLD = 72;
 const DEFAULT_LLM_CONFIG = {
   baseUrl: "https://api.deepseek.com",
@@ -13,7 +14,6 @@ const DEFAULT_LLM_CONFIG = {
   model: "deepseek-v4-flash",
   temperature: 0.2,
   maxTokens: 1600,
-  historyMessages: 12,
 };
 const LEGACY_DEFAULT_BASE_URLS = new Set([
   "",
@@ -61,7 +61,6 @@ const elements = {
   llmConfigForm: document.querySelector("#llm-config-form"),
   llmContextLabel: document.querySelector("#llm-context-label"),
   llmFab: document.querySelector("#llm-fab"),
-  llmHistoryMessages: document.querySelector("#llm-history-messages"),
   llmMaxTokens: document.querySelector("#llm-max-tokens"),
   llmMessageInput: document.querySelector("#llm-message-input"),
   llmModel: document.querySelector("#llm-model"),
@@ -95,7 +94,9 @@ const state = {
   docs: [],
   docsByPath: new Map(),
   expandedDirs: new Set(),
+  llmActiveTopicId: createId("topic"),
   llmChatMessages: [],
+  llmTopics: [],
   llmAbortController: null,
   llmPendingRender: null,
   llmScrollFrame: 0,
@@ -215,6 +216,10 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function createId(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 init().catch((error) => {
   showError("文档清单加载失败", error);
 });
@@ -291,6 +296,7 @@ function bindEvents() {
   });
   elements.llmClearConfig.addEventListener("click", clearLlmConfig);
   elements.llmClearCurrentChat.addEventListener("click", () => clearCurrentChat({ fromSettings: true }));
+  elements.llmChatMessages.addEventListener("click", handleChatMessagesClick);
   elements.llmChatMessages.addEventListener("scroll", updateChatAutoScrollState, { passive: true });
   elements.llmSend.addEventListener("click", sendLlmMessage);
   elements.llmStop.addEventListener("click", stopLlmAnalysis);
@@ -626,7 +632,6 @@ function loadLlmConfig() {
   elements.llmModel.value = config.model;
   elements.llmTemperature.value = String(config.temperature);
   elements.llmMaxTokens.value = String(config.maxTokens);
-  elements.llmHistoryMessages.value = String(config.historyMessages);
 }
 
 function readStoredLlmConfig() {
@@ -692,7 +697,6 @@ function getLlmConfigFromForm() {
     model: elements.llmModel.value,
     temperature: elements.llmTemperature.value,
     maxTokens: elements.llmMaxTokens.value,
-    historyMessages: elements.llmHistoryMessages.value,
   });
 }
 
@@ -703,7 +707,6 @@ function normalizeLlmConfig(config) {
     model: String(config.model || "").trim(),
     temperature: clampNumber(config.temperature, 0, 2, DEFAULT_LLM_CONFIG.temperature),
     maxTokens: clampNumber(config.maxTokens, 128, 12000, DEFAULT_LLM_CONFIG.maxTokens),
-    historyMessages: clampNumber(config.historyMessages, 0, 40, DEFAULT_LLM_CONFIG.historyMessages),
   };
 
   if (!normalized.baseUrl) {
@@ -792,7 +795,7 @@ async function sendLlmMessage() {
     return;
   }
 
-  const requestMessages = buildLlmMessages(config, userMessage, state.selectedDocSource);
+  const requestMessages = buildLlmMessages(userMessage, state.selectedDocSource);
 
   state.llmAbortController = new AbortController();
   setLlmBusy(true);
@@ -974,9 +977,8 @@ function buildLlmHeaders(config) {
   return headers;
 }
 
-function buildLlmMessages(config, userMessage, documentText) {
-  const history =
-    config.historyMessages > 0 ? state.llmChatMessages.slice(-config.historyMessages) : [];
+function buildLlmMessages(userMessage, documentText) {
+  const history = getActiveTopicMessages();
   return [
     {
       role: "system",
@@ -1007,32 +1009,231 @@ function buildDocumentContextMessage(documentText) {
   ].join("\n");
 }
 
+function getActiveTopicMessages() {
+  return state.llmChatMessages.filter((message) => message.topicId === state.llmActiveTopicId);
+}
+
+function handleChatMessagesClick(event) {
+  const button = event.target.closest("[data-action]");
+  if (!button) {
+    return;
+  }
+
+  if (button.dataset.action === "end-topic") {
+    endTopicAfterMessage(button.dataset.messageId);
+    return;
+  }
+
+  if (button.dataset.action === "export-topic") {
+    exportTopic(button.dataset.topicId);
+  }
+}
+
+function endTopicAfterMessage(messageId) {
+  if (state.llmAbortController) {
+    setLlmStatus("请等当前回复完成后再结束话题。", "error");
+    return;
+  }
+
+  const selectedMessage = state.llmChatMessages.find((message) => message.id === messageId);
+  if (!selectedMessage || selectedMessage.topicId !== state.llmActiveTopicId) {
+    setLlmStatus("只能结束当前未完成话题。", "error");
+    return;
+  }
+
+  const currentTopicMessages = getActiveTopicMessages();
+  const endIndex = currentTopicMessages.findIndex((message) => message.id === messageId);
+  if (endIndex < 0) {
+    setLlmStatus("没有可结束的话题。", "error");
+    return;
+  }
+
+  const closedMessages = currentTopicMessages.slice(0, endIndex + 1);
+  const remainingMessages = currentTopicMessages.slice(endIndex + 1);
+  const closedTopicId = state.llmActiveTopicId;
+  const nextTopicId = createId("topic");
+  const topic = {
+    id: closedTopicId,
+    title: createTopicTitle(closedMessages),
+    closedAt: new Date().toISOString(),
+    messageIds: closedMessages.map((message) => message.id),
+  };
+
+  remainingMessages.forEach((message) => {
+    message.topicId = nextTopicId;
+  });
+  state.llmTopics.push(topic);
+  state.llmActiveTopicId = nextTopicId;
+
+  saveCurrentChat();
+  renderChatMessages({ scroll: false });
+  findTopicDivider(topic.id)?.scrollIntoView({ block: "nearest" });
+  updateLlmContextLabel();
+  setLlmStatus("话题已结束，后续请求只会带入新的当前话题。");
+}
+
+function findTopicDivider(topicId) {
+  return Array.from(elements.llmChatMessages.querySelectorAll(".chat-topic-divider")).find(
+    (divider) => divider.dataset.topicId === topicId,
+  );
+}
+
+function createTopicTitle(messages) {
+  const firstUserMessage = messages.find((message) => message.role === "user") || messages[0];
+  const text = firstUserMessage?.content.replace(/\s+/g, " ").trim() || "已结束话题";
+  return text.length > 28 ? `${text.slice(0, 28)}...` : text;
+}
+
+function exportTopic(topicId) {
+  const topic = state.llmTopics.find((item) => item.id === topicId);
+  if (!topic) {
+    setLlmStatus("没有找到可导出的话题。", "error");
+    return;
+  }
+
+  const messageById = new Map(state.llmChatMessages.map((message) => [message.id, message]));
+  const messages = topic.messageIds.map((messageId) => messageById.get(messageId)).filter(Boolean);
+  if (!messages.length) {
+    setLlmStatus("这个话题没有可导出的消息。", "error");
+    return;
+  }
+
+  const markdown = formatTopicExport(topic, messages);
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${safeFilename(state.selectedDoc?.title || "文档")}-${safeFilename(topic.title)}.md`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  setLlmStatus("已导出话题。");
+}
+
+function formatTopicExport(topic, messages) {
+  const lines = [
+    `# ${topic.title}`,
+    "",
+    `- 当前文档：${state.selectedPath}`,
+    `- 结束时间：${formatDateTime(topic.closedAt)}`,
+    `- 消息数：${messages.length}`,
+    "",
+    "---",
+    "",
+  ];
+
+  messages.forEach((message) => {
+    lines.push(`## ${message.role === "user" ? "用户" : "AI"}`, "", message.content, "");
+  });
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN");
+}
+
+function safeFilename(value) {
+  return String(value)
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "话题";
+}
+
 function loadChatForCurrentDoc() {
-  state.llmChatMessages = readStoredChatMessages(state.selectedPath);
+  const chatState = readStoredChatState(state.selectedPath);
+  state.llmChatMessages = chatState.messages;
+  state.llmTopics = chatState.topics;
+  state.llmActiveTopicId = chatState.activeTopicId;
   renderChatMessages();
 }
 
-function readStoredChatMessages(path) {
+function readStoredChatState(path) {
   if (!path) {
-    return [];
+    return createEmptyChatState();
   }
   try {
-    const rawMessages = localStorage.getItem(getChatStorageKey(path));
-    const messages = rawMessages ? JSON.parse(rawMessages) : [];
-    if (!Array.isArray(messages)) {
-      return [];
+    const rawState = localStorage.getItem(getChatStorageKey(path));
+    const parsedState = rawState ? JSON.parse(rawState) : null;
+    if (Array.isArray(parsedState)) {
+      return migrateLegacyChatMessages(parsedState);
     }
-    return messages
-      .filter(isValidChatMessage)
-      .slice(-80)
-      .map((message, index) => ({
-        id: message.id || `${Date.now()}-${index}`,
-        role: message.role,
-        content: message.content,
-      }));
+    return normalizeChatState(parsedState);
   } catch {
+    return createEmptyChatState();
+  }
+}
+
+function createEmptyChatState() {
+  return {
+    messages: [],
+    topics: [],
+    activeTopicId: createId("topic"),
+  };
+}
+
+function migrateLegacyChatMessages(messages) {
+  const activeTopicId = createId("topic");
+  return {
+    messages: normalizeChatMessages(messages, activeTopicId),
+    topics: [],
+    activeTopicId,
+  };
+}
+
+function normalizeChatState(chatState) {
+  const activeTopicId =
+    typeof chatState?.activeTopicId === "string" && chatState.activeTopicId
+      ? chatState.activeTopicId
+      : createId("topic");
+  const messages = normalizeChatMessages(chatState?.messages, activeTopicId);
+  const messageIds = new Set(messages.map((message) => message.id));
+  const topics = Array.isArray(chatState?.topics)
+    ? chatState.topics
+        .map((topic) => normalizeTopic(topic, messageIds))
+        .filter(Boolean)
+    : [];
+  return {
+    messages,
+    topics,
+    activeTopicId,
+  };
+}
+
+function normalizeChatMessages(messages, fallbackTopicId) {
+  if (!Array.isArray(messages)) {
     return [];
   }
+  return messages.filter(isValidChatMessage).map((message, index) => ({
+    id: message.id || `${Date.now()}-${index}`,
+    role: message.role,
+    content: message.content,
+    topicId:
+      typeof message.topicId === "string" && message.topicId
+        ? message.topicId
+        : fallbackTopicId,
+  }));
+}
+
+function normalizeTopic(topic, messageIds) {
+  const topicMessageIds = Array.isArray(topic?.messageIds)
+    ? topic.messageIds.filter((id) => typeof id === "string" && messageIds.has(id))
+    : [];
+  if (!topicMessageIds.length) {
+    return null;
+  }
+  return {
+    id: typeof topic.id === "string" && topic.id ? topic.id : createId("topic"),
+    title: typeof topic.title === "string" && topic.title ? topic.title : "已结束话题",
+    closedAt:
+      typeof topic.closedAt === "string" && topic.closedAt
+        ? topic.closedAt
+        : new Date().toISOString(),
+    messageIds: topicMessageIds,
+  };
 }
 
 function isValidChatMessage(message) {
@@ -1047,14 +1248,35 @@ function saveCurrentChat() {
   if (!state.selectedPath) {
     return;
   }
-  localStorage.setItem(getChatStorageKey(state.selectedPath), JSON.stringify(state.llmChatMessages.slice(-80)));
+  localStorage.setItem(
+    getChatStorageKey(state.selectedPath),
+    JSON.stringify({
+      version: LLM_CHAT_STORAGE_VERSION,
+      activeTopicId: state.llmActiveTopicId,
+      topics: state.llmTopics,
+      messages: state.llmChatMessages,
+    }),
+  );
 }
 
 function getChatStorageKey(path) {
   return `${LLM_CHAT_KEY_PREFIX}${encodeURIComponent(path)}`;
 }
 
-function renderChatMessages() {
+function getTopicsByEndMessageId() {
+  return new Map(
+    state.llmTopics
+      .map((topic) => [topic.messageIds.at(-1), topic])
+      .filter(([messageId]) => Boolean(messageId)),
+  );
+}
+
+function canEndTopicAtMessage(message) {
+  return message.topicId === state.llmActiveTopicId && message.content !== "正在生成...";
+}
+
+function renderChatMessages(options = {}) {
+  const { scroll = true } = options;
   elements.llmChatMessages.replaceChildren();
   if (!state.llmChatMessages.length) {
     const empty = document.createElement("div");
@@ -1065,10 +1287,17 @@ function renderChatMessages() {
     return;
   }
 
+  const topicsByEndMessageId = getTopicsByEndMessageId();
   state.llmChatMessages.forEach((message) => {
     elements.llmChatMessages.append(renderChatMessage(message));
+    const topic = topicsByEndMessageId.get(message.id);
+    if (topic) {
+      elements.llmChatMessages.append(renderTopicDivider(topic));
+    }
   });
-  scrollChatToBottom();
+  if (scroll) {
+    scrollChatToBottom();
+  }
 }
 
 function appendChatMessage(role, content) {
@@ -1076,6 +1305,7 @@ function appendChatMessage(role, content) {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
     role,
     content,
+    topicId: state.llmActiveTopicId,
   };
   state.llmChatMessages.push(message);
   if (elements.llmChatMessages.querySelector(".chat-empty")) {
@@ -1083,6 +1313,7 @@ function appendChatMessage(role, content) {
   }
   elements.llmChatMessages.append(renderChatMessage(message));
   scrollChatToBottom();
+  updateLlmContextLabel();
   return message;
 }
 
@@ -1131,12 +1362,14 @@ function updateChatMessage(message, content) {
 function removeChatMessage(message) {
   state.llmChatMessages = state.llmChatMessages.filter((item) => item.id !== message.id);
   renderChatMessages();
+  updateLlmContextLabel();
 }
 
 function renderChatMessage(message) {
   const item = document.createElement("article");
   item.className = `chat-message is-${message.role}`;
   item.dataset.messageId = message.id;
+  item.dataset.topicId = message.topicId || "";
 
   const label = document.createElement("div");
   label.className = "chat-message-label";
@@ -1147,7 +1380,38 @@ function renderChatMessage(message) {
   renderMarkdownInto(body, message.content);
 
   item.append(label, body);
+  if (canEndTopicAtMessage(message)) {
+    const actions = document.createElement("div");
+    actions.className = "chat-message-actions";
+    const endButton = document.createElement("button");
+    endButton.className = "chat-inline-action";
+    endButton.type = "button";
+    endButton.dataset.action = "end-topic";
+    endButton.dataset.messageId = message.id;
+    endButton.textContent = "结束话题";
+    actions.append(endButton);
+    item.append(actions);
+  }
   return item;
+}
+
+function renderTopicDivider(topic) {
+  const divider = document.createElement("div");
+  divider.className = "chat-topic-divider";
+  divider.dataset.topicId = topic.id;
+
+  const label = document.createElement("span");
+  label.textContent = `已结束话题：${topic.title}`;
+
+  const exportButton = document.createElement("button");
+  exportButton.className = "chat-inline-action";
+  exportButton.type = "button";
+  exportButton.dataset.action = "export-topic";
+  exportButton.dataset.topicId = topic.id;
+  exportButton.textContent = "导出";
+
+  divider.append(label, exportButton);
+  return divider;
 }
 
 function clearCurrentChat(options = {}) {
@@ -1161,8 +1425,11 @@ function clearCurrentChat(options = {}) {
   }
 
   state.llmChatMessages = [];
+  state.llmTopics = [];
+  state.llmActiveTopicId = createId("topic");
   localStorage.removeItem(getChatStorageKey(state.selectedPath));
   renderChatMessages();
+  updateLlmContextLabel();
 
   const message = "当前文档对话已清空。";
   setLlmStatus(message);
@@ -1211,9 +1478,9 @@ function updateLlmContextLabel() {
     elements.llmContextLabel.textContent = "等待文档加载";
     return;
   }
-  const config = readStoredLlmConfig();
   const sourceLength = state.selectedDocSource.length;
-  elements.llmContextLabel.textContent = `${state.selectedDoc.title} · 文档上下文 ${sourceLength} 字`;
+  const activeTopicCount = getActiveTopicMessages().length;
+  elements.llmContextLabel.textContent = `${state.selectedDoc.title} · 文档上下文 ${sourceLength} 字 · 当前话题 ${activeTopicCount} 条`;
 }
 
 async function readJsonResponse(response) {
