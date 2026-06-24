@@ -98,6 +98,7 @@ const state = {
   llmChatMessages: [],
   llmAbortController: null,
   llmPendingRender: null,
+  llmScrollFrame: 0,
   llmRenderFrame: 0,
   llmShouldAutoScroll: true,
   manifest: null,
@@ -729,6 +730,7 @@ function openLlmPanel() {
   elements.llmScrim.hidden = false;
   document.body.classList.add("llm-open");
   elements.llmPanel.setAttribute("aria-hidden", "false");
+  scrollChatToBottomAfterLayout();
   elements.llmMessageInput.focus();
 }
 
@@ -1172,6 +1174,20 @@ function clearCurrentChat(options = {}) {
 function scrollChatToBottom() {
   elements.llmChatMessages.scrollTop = elements.llmChatMessages.scrollHeight;
   state.llmShouldAutoScroll = true;
+}
+
+function scrollChatToBottomAfterLayout() {
+  if (state.llmScrollFrame) {
+    cancelAnimationFrame(state.llmScrollFrame);
+  }
+
+  state.llmScrollFrame = requestAnimationFrame(() => {
+    scrollChatToBottom();
+    state.llmScrollFrame = requestAnimationFrame(() => {
+      scrollChatToBottom();
+      state.llmScrollFrame = 0;
+    });
+  });
 }
 
 function updateChatAutoScrollState() {
