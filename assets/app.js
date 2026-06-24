@@ -35,6 +35,7 @@ const elements = {
   llmClose: document.querySelector("#llm-close"),
   llmConfigForm: document.querySelector("#llm-config-form"),
   llmContextLabel: document.querySelector("#llm-context-label"),
+  llmFab: document.querySelector("#llm-fab"),
   llmHistoryMessages: document.querySelector("#llm-history-messages"),
   llmMaxDocChars: document.querySelector("#llm-max-doc-chars"),
   llmMaxTokens: document.querySelector("#llm-max-tokens"),
@@ -145,6 +146,7 @@ function bindEvents() {
   });
 
   elements.llmOpen.addEventListener("click", openLlmPanel);
+  elements.llmFab.addEventListener("click", openLlmPanel);
   elements.llmClose.addEventListener("click", closeLlmPanel);
   elements.llmScrim.addEventListener("click", closeLlmPanel);
   elements.llmSettingsOpen.addEventListener("click", openLlmSettings);

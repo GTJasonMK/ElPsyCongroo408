@@ -492,35 +492,77 @@ a {
   inset: 0;
   z-index: 70;
   border: 0;
-  background: rgba(20, 24, 21, 0.38);
+  background: transparent;
   opacity: 0;
   pointer-events: none;
   transition: opacity 160ms ease;
 }
 
+.llm-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 65;
+  width: 54px;
+  height: 54px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: var(--shadow);
+  color: #ffffff;
+  cursor: pointer;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.llm-fab:hover,
+.llm-fab:focus-visible {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+}
+
+.llm-fab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+body.llm-open .llm-fab {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .llm-panel {
   position: fixed;
-  top: 0;
-  right: 0;
+  right: 24px;
+  bottom: 24px;
   z-index: 80;
   display: flex;
   flex-direction: column;
-  width: min(560px, 100vw);
-  height: 100vh;
-  border-left: 1px solid var(--line);
+  width: min(460px, calc(100vw - 32px));
+  height: min(690px, calc(100vh - 48px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   background: #fbfcfa;
   box-shadow: var(--shadow);
-  transform: translateX(102%);
-  transition: transform 180ms ease;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(16px) scale(0.98);
+  transform-origin: right bottom;
+  transition:
+    opacity 160ms ease,
+    transform 180ms ease;
 }
 
 body.llm-open .llm-scrim {
-  opacity: 1;
-  pointer-events: auto;
+  opacity: 0;
+  pointer-events: none;
 }
 
 body.llm-open .llm-panel {
-  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
 }
 
 .llm-header {
@@ -833,7 +875,7 @@ body.llm-open .llm-panel {
   }
 
   .viewer {
-    padding: 22px 16px 60px;
+    padding: 22px 16px 100px;
   }
 
   .doc-toolbar {
@@ -861,7 +903,24 @@ body.llm-open .llm-panel {
   }
 
   .llm-panel {
-    width: 100vw;
+    right: 10px;
+    bottom: 10px;
+    width: calc(100vw - 20px);
+    height: min(760px, calc(100vh - 20px));
+    transform-origin: center bottom;
+  }
+
+  .llm-fab {
+    right: 16px;
+    bottom: 16px;
+    width: 50px;
+    height: 50px;
+  }
+
+  body.llm-open .llm-scrim {
+    background: rgba(20, 24, 21, 0.24);
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .llm-header,
@@ -895,6 +954,7 @@ body.llm-open .llm-panel {
   .doc-actions,
   .scrim,
   .llm-scrim,
+  .llm-fab,
   .llm-panel {
     display: none !important;
   }
