@@ -6,6 +6,7 @@ const MANIFEST_URL = "./docs-manifest.json";
 const EXTERNAL_LINK_RE = /^(https?:|mailto:|tel:)/i;
 const LLM_CONFIG_KEY = "elpsy-docs.llm.config.v1";
 const LLM_CHAT_KEY_PREFIX = "elpsy-docs.llm.chat.v1:";
+const CHAT_BOTTOM_THRESHOLD = 72;
 const DEFAULT_LLM_CONFIG = {
   baseUrl: "https://api.deepseek.com",
   apiKey: "",
@@ -98,6 +99,7 @@ const state = {
   llmAbortController: null,
   llmPendingRender: null,
   llmRenderFrame: 0,
+  llmShouldAutoScroll: true,
   manifest: null,
   query: "",
   selectedDoc: null,
@@ -288,6 +290,7 @@ function bindEvents() {
   });
   elements.llmClearConfig.addEventListener("click", clearLlmConfig);
   elements.llmClearCurrentChat.addEventListener("click", () => clearCurrentChat({ fromSettings: true }));
+  elements.llmChatMessages.addEventListener("scroll", updateChatAutoScrollState, { passive: true });
   elements.llmSend.addEventListener("click", sendLlmMessage);
   elements.llmStop.addEventListener("click", stopLlmAnalysis);
   elements.llmClearChat.addEventListener("click", clearCurrentChat);
@@ -1056,6 +1059,7 @@ function renderChatMessages() {
     empty.className = "chat-empty";
     empty.textContent = "可以直接询问当前文档。";
     elements.llmChatMessages.append(empty);
+    state.llmShouldAutoScroll = true;
     return;
   }
 
@@ -1114,9 +1118,12 @@ function updateChatMessage(message, content) {
     renderChatMessages();
     return;
   }
+  const shouldScroll = shouldAutoScrollChat();
   const body = bubble.querySelector(".chat-message-body");
   renderMarkdownInto(body, content);
-  scrollChatToBottom();
+  if (shouldScroll) {
+    scrollChatToBottom();
+  }
 }
 
 function removeChatMessage(message) {
@@ -1164,6 +1171,23 @@ function clearCurrentChat(options = {}) {
 
 function scrollChatToBottom() {
   elements.llmChatMessages.scrollTop = elements.llmChatMessages.scrollHeight;
+  state.llmShouldAutoScroll = true;
+}
+
+function updateChatAutoScrollState() {
+  state.llmShouldAutoScroll = isChatNearBottom();
+}
+
+function shouldAutoScrollChat() {
+  return state.llmShouldAutoScroll || isChatNearBottom();
+}
+
+function isChatNearBottom() {
+  const distanceFromBottom =
+    elements.llmChatMessages.scrollHeight -
+    elements.llmChatMessages.scrollTop -
+    elements.llmChatMessages.clientHeight;
+  return distanceFromBottom <= CHAT_BOTTOM_THRESHOLD;
 }
 
 function updateLlmContextLabel() {
