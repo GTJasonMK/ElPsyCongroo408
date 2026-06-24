@@ -920,9 +920,10 @@ body.llm-open .llm-panel {
     height: 50vh;
     height: 50dvh;
     border: 0;
+    border-top: 1px solid rgba(194, 201, 191, 0.55);
     border-radius: 12px 12px 0 0;
-    background: transparent;
-    box-shadow: none;
+    background: rgba(251, 252, 250, 0.72);
+    box-shadow: 0 -12px 28px rgba(34, 39, 34, 0.10);
     transform-origin: center bottom;
   }
 
@@ -986,7 +987,7 @@ body.llm-open .llm-panel {
     min-height: 44px;
     max-height: 44px;
     resize: none;
-    background: transparent;
+    background: rgba(255, 255, 255, 0.68);
     line-height: 1.45;
   }
 
