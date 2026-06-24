@@ -847,6 +847,7 @@ async function sendLlmMessage() {
     saveCurrentChat();
   } finally {
     state.llmAbortController = null;
+    syncChatMessageActions(pendingMessage);
     setLlmBusy(false);
   }
 }
@@ -1272,7 +1273,11 @@ function getTopicsByEndMessageId() {
 }
 
 function canEndTopicAtMessage(message) {
-  return message.topicId === state.llmActiveTopicId && message.content !== "正在生成...";
+  return (
+    !state.llmAbortController &&
+    message.topicId === state.llmActiveTopicId &&
+    message.content !== "正在生成..."
+  );
 }
 
 function renderChatMessages(options = {}) {
@@ -1354,6 +1359,7 @@ function updateChatMessage(message, content) {
   const shouldScroll = shouldAutoScrollChat();
   const body = bubble.querySelector(".chat-message-body");
   renderMarkdownInto(body, content);
+  syncChatMessageActions(message);
   if (shouldScroll) {
     scrollChatToBottom();
   }
@@ -1380,19 +1386,45 @@ function renderChatMessage(message) {
   renderMarkdownInto(body, message.content);
 
   item.append(label, body);
-  if (canEndTopicAtMessage(message)) {
-    const actions = document.createElement("div");
-    actions.className = "chat-message-actions";
-    const endButton = document.createElement("button");
-    endButton.className = "chat-inline-action";
-    endButton.type = "button";
-    endButton.dataset.action = "end-topic";
-    endButton.dataset.messageId = message.id;
-    endButton.textContent = "结束话题";
-    actions.append(endButton);
+  const actions = createEndTopicActions(message);
+  if (actions) {
     item.append(actions);
   }
   return item;
+}
+
+function syncChatMessageActions(message) {
+  const item = elements.llmChatMessages.querySelector(`[data-message-id="${message.id}"]`);
+  if (!item) {
+    return;
+  }
+
+  const existingActions = item.querySelector(".chat-message-actions");
+  if (!canEndTopicAtMessage(message)) {
+    existingActions?.remove();
+    return;
+  }
+
+  if (!existingActions) {
+    item.append(createEndTopicActions(message));
+  }
+}
+
+function createEndTopicActions(message) {
+  if (!canEndTopicAtMessage(message)) {
+    return null;
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "chat-message-actions";
+  const endButton = document.createElement("button");
+  endButton.className = "chat-inline-action";
+  endButton.type = "button";
+  endButton.dataset.action = "end-topic";
+  endButton.dataset.messageId = message.id;
+  endButton.textContent = "结束话题";
+  actions.append(endButton);
+  return actions;
 }
 
 function renderTopicDivider(topic) {
