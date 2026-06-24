@@ -119,10 +119,6 @@
             <input id="llm-max-tokens" type="number" min="128" max="12000" step="128" />
           </label>
           <label class="form-field">
-            <span>文档上限</span>
-            <input id="llm-max-doc-chars" type="number" min="2000" max="120000" step="1000" />
-          </label>
-          <label class="form-field">
             <span>历史消息</span>
             <input id="llm-history-messages" type="number" min="0" max="40" step="2" />
           </label>
@@ -134,6 +130,6 @@
         <div class="llm-status" id="llm-settings-status" role="status" aria-live="polite"></div>
       </form>
     </dialog>
-    <script type="module" src="./assets/app.js?v=20260624-deepseek-v4-flash"></script>
+    <script type="module" src="./assets/app.js?v=20260624-full-doc-context"></script>
   </body>
 </html>

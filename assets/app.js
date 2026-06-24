@@ -11,7 +11,6 @@ const DEFAULT_LLM_CONFIG = {
   model: "deepseek-v4-flash",
   temperature: 0.2,
   maxTokens: 1600,
-  maxDocChars: 24000,
   historyMessages: 12,
 };
 const LEGACY_DEFAULT_BASE_URLS = new Set([
@@ -43,7 +42,6 @@ const elements = {
   llmContextLabel: document.querySelector("#llm-context-label"),
   llmFab: document.querySelector("#llm-fab"),
   llmHistoryMessages: document.querySelector("#llm-history-messages"),
-  llmMaxDocChars: document.querySelector("#llm-max-doc-chars"),
   llmMaxTokens: document.querySelector("#llm-max-tokens"),
   llmMessageInput: document.querySelector("#llm-message-input"),
   llmModel: document.querySelector("#llm-model"),
@@ -501,7 +499,6 @@ function loadLlmConfig() {
   elements.llmModel.value = config.model;
   elements.llmTemperature.value = String(config.temperature);
   elements.llmMaxTokens.value = String(config.maxTokens);
-  elements.llmMaxDocChars.value = String(config.maxDocChars);
   elements.llmHistoryMessages.value = String(config.historyMessages);
 }
 
@@ -568,7 +565,6 @@ function getLlmConfigFromForm() {
     model: elements.llmModel.value,
     temperature: elements.llmTemperature.value,
     maxTokens: elements.llmMaxTokens.value,
-    maxDocChars: elements.llmMaxDocChars.value,
     historyMessages: elements.llmHistoryMessages.value,
   });
 }
@@ -580,7 +576,6 @@ function normalizeLlmConfig(config) {
     model: String(config.model || "").trim(),
     temperature: clampNumber(config.temperature, 0, 2, DEFAULT_LLM_CONFIG.temperature),
     maxTokens: clampNumber(config.maxTokens, 128, 12000, DEFAULT_LLM_CONFIG.maxTokens),
-    maxDocChars: clampNumber(config.maxDocChars, 2000, 120000, DEFAULT_LLM_CONFIG.maxDocChars),
     historyMessages: clampNumber(config.historyMessages, 0, 40, DEFAULT_LLM_CONFIG.historyMessages),
   };
 
@@ -669,13 +664,11 @@ async function sendLlmMessage() {
     return;
   }
 
-  const documentText = state.selectedDocSource.slice(0, config.maxDocChars);
-  const isTruncated = state.selectedDocSource.length > documentText.length;
-  const requestMessages = buildLlmMessages(config, userMessage, documentText, isTruncated);
+  const requestMessages = buildLlmMessages(config, userMessage, state.selectedDocSource);
 
   state.llmAbortController = new AbortController();
   setLlmBusy(true);
-  setLlmStatus(isTruncated ? `正在请求，文档前缀 ${documentText.length} 字。` : "正在请求。");
+  setLlmStatus("正在请求。");
   appendChatMessage("user", userMessage);
   elements.llmMessageInput.value = "";
   const pendingMessage = appendChatMessage("assistant", "正在生成...");
@@ -744,7 +737,7 @@ function buildLlmHeaders(config) {
   return headers;
 }
 
-function buildLlmMessages(config, userMessage, documentText, isTruncated) {
+function buildLlmMessages(config, userMessage, documentText) {
   const history =
     config.historyMessages > 0 ? state.llmChatMessages.slice(-config.historyMessages) : [];
   return [
@@ -754,7 +747,7 @@ function buildLlmMessages(config, userMessage, documentText, isTruncated) {
     },
     {
       role: "user",
-      content: buildDocumentContextMessage(documentText, isTruncated),
+      content: buildDocumentContextMessage(documentText),
     },
     ...history.map((message) => ({
       role: message.role,
@@ -767,11 +760,9 @@ function buildLlmMessages(config, userMessage, documentText, isTruncated) {
   ];
 }
 
-function buildDocumentContextMessage(documentText, isTruncated) {
-  const truncatedNote = isTruncated ? "\n注意：以下文档内容因长度限制被截断，只分析可见部分。\n" : "";
+function buildDocumentContextMessage(documentText) {
   return [
     `当前文件：${state.selectedPath}`,
-    truncatedNote,
     "文档内容：",
     "```markdown",
     documentText,
@@ -911,9 +902,7 @@ function updateLlmContextLabel() {
   }
   const config = readStoredLlmConfig();
   const sourceLength = state.selectedDocSource.length;
-  const contextLength = Math.min(sourceLength, config.maxDocChars);
-  const suffix = sourceLength > contextLength ? `前 ${contextLength} 字` : `${contextLength} 字`;
-  elements.llmContextLabel.textContent = `${state.selectedDoc.title} · 文档上下文 ${suffix}`;
+  elements.llmContextLabel.textContent = `${state.selectedDoc.title} · 文档上下文 ${sourceLength} 字`;
 }
 
 async function readJsonResponse(response) {
