@@ -1,0 +1,9 @@
+{
+  "name": "elpsycongroo408-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-manifest.mjs",
+    "serve": "npm run build && python3 -m http.server 4173"
+  }
+}

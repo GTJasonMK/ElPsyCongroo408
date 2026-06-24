@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ElPsyCongroo408 文档</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <button class="icon-button menu-button" id="menu-button" type="button" aria-label="打开目录" title="打开目录">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+        <div class="brand">
+          <strong>ElPsyCongroo408 文档</strong>
+          <span id="doc-count">加载中</span>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar" id="sidebar" aria-label="文档目录">
+          <div class="sidebar-tools">
+            <label class="search-box" for="search-input">
+              <span aria-hidden="true"></span>
+              <input id="search-input" type="search" autocomplete="off" placeholder="搜索文件" />
+            </label>
+          </div>
+          <nav class="tree" id="tree" aria-label="文件树"></nav>
+        </aside>
+
+        <main class="viewer" id="viewer">
+          <div class="doc-toolbar">
+            <div class="doc-heading">
+              <div class="breadcrumb" id="breadcrumb"></div>
+              <h1 id="doc-title">文档</h1>
+            </div>
+            <div class="doc-actions">
+              <a class="action-button" id="raw-link" href="#" target="_blank" rel="noreferrer">源文件</a>
+              <button class="action-button" id="copy-link" type="button">复制链接</button>
+            </div>
+          </div>
+          <article class="markdown-body" id="content" aria-live="polite">
+            <p>正在加载文档...</p>
+          </article>
+        </main>
+      </div>
+    </div>
+    <button class="scrim" id="scrim" type="button" aria-label="关闭目录"></button>
+    <script type="module" src="./assets/app.js"></script>
+  </body>
+</html>
