@@ -3,6 +3,20 @@ import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify/dist/purify.es.mjs
 
 const MANIFEST_URL = "./docs-manifest.json";
 const EXTERNAL_LINK_RE = /^(https?:|mailto:|tel:)/i;
+const LLM_CONFIG_KEY = "elpsy-docs.llm.config.v1";
+const DEFAULT_LLM_CONFIG = {
+  baseUrl: "https://api.openai.com/v1",
+  apiKey: "",
+  model: "",
+  temperature: 0.2,
+  maxTokens: 1600,
+  maxDocChars: 24000,
+};
+const LLM_PROMPTS = {
+  summary: "请对当前文档做结构化学习分析：先概括核心主题，再列出关键知识点、推导线索、适用场景和复习优先级。输出中文 Markdown。",
+  mistakes: "请分析当前文档中最容易混淆、漏条件或误用的点。按“易错点 -> 为什么错 -> 正确判断方式 -> 例题触发信号”的格式输出中文 Markdown。",
+  quiz: "请基于当前文档生成自测题：包含基础题、辨析题和综合题，并在每题后给出简洁答案与解析。输出中文 Markdown。",
+};
 
 const elements = {
   breadcrumb: document.querySelector("#breadcrumb"),
@@ -10,6 +24,24 @@ const elements = {
   copyLink: document.querySelector("#copy-link"),
   docCount: document.querySelector("#doc-count"),
   docTitle: document.querySelector("#doc-title"),
+  llmApiKey: document.querySelector("#llm-api-key"),
+  llmBaseUrl: document.querySelector("#llm-base-url"),
+  llmClearConfig: document.querySelector("#llm-clear-config"),
+  llmClose: document.querySelector("#llm-close"),
+  llmConfigForm: document.querySelector("#llm-config-form"),
+  llmMaxDocChars: document.querySelector("#llm-max-doc-chars"),
+  llmMaxTokens: document.querySelector("#llm-max-tokens"),
+  llmModel: document.querySelector("#llm-model"),
+  llmOpen: document.querySelector("#llm-open"),
+  llmPanel: document.querySelector("#llm-panel"),
+  llmPrompt: document.querySelector("#llm-prompt"),
+  llmPrompts: document.querySelector("#llm-prompts"),
+  llmResult: document.querySelector("#llm-result"),
+  llmRun: document.querySelector("#llm-run"),
+  llmScrim: document.querySelector("#llm-scrim"),
+  llmStatus: document.querySelector("#llm-status"),
+  llmStop: document.querySelector("#llm-stop"),
+  llmTemperature: document.querySelector("#llm-temperature"),
   menuButton: document.querySelector("#menu-button"),
   rawLink: document.querySelector("#raw-link"),
   scrim: document.querySelector("#scrim"),
@@ -27,8 +59,11 @@ const state = {
   docs: [],
   docsByPath: new Map(),
   expandedDirs: new Set(),
+  llmAbortController: null,
   manifest: null,
   query: "",
+  selectedDoc: null,
+  selectedDocSource: "",
   selectedPath: "",
   tree: null,
 };
@@ -45,6 +80,8 @@ init().catch((error) => {
 
 async function init() {
   bindEvents();
+  loadLlmConfig();
+  setPromptTemplate("summary");
 
   const response = await fetch(MANIFEST_URL, { cache: "no-cache" });
   if (!response.ok) {
@@ -94,6 +131,33 @@ function bindEvents() {
     window.setTimeout(() => {
       elements.copyLink.textContent = previousText;
     }, 1200);
+  });
+
+  elements.llmOpen.addEventListener("click", openLlmPanel);
+  elements.llmClose.addEventListener("click", closeLlmPanel);
+  elements.llmScrim.addEventListener("click", closeLlmPanel);
+  elements.llmConfigForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    try {
+      saveLlmConfig();
+    } catch {
+      // saveLlmConfig already reports the validation error in the panel.
+    }
+  });
+  elements.llmClearConfig.addEventListener("click", clearLlmConfig);
+  elements.llmRun.addEventListener("click", runLlmAnalysis);
+  elements.llmStop.addEventListener("click", stopLlmAnalysis);
+  elements.llmPrompts.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-prompt]");
+    if (!button) {
+      return;
+    }
+    setPromptTemplate(button.dataset.prompt);
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && document.body.classList.contains("llm-open")) {
+      closeLlmPanel();
+    }
   });
 }
 
@@ -270,6 +334,7 @@ async function selectDoc(path, options = {}) {
   }
 
   state.selectedPath = path;
+  state.selectedDoc = doc;
   expandDirsForPath(path);
   updateRoute(path, options);
   updateHeader(doc);
@@ -306,6 +371,7 @@ async function renderDocument(doc) {
     }
 
     const source = await response.text();
+    state.selectedDocSource = source;
     document.title = `${doc.title} - ElPsyCongroo408 文档`;
 
     if (doc.extension === ".txt") {
@@ -321,12 +387,16 @@ async function renderDocument(doc) {
 }
 
 function renderMarkdown(source, doc) {
-  const html = marked.parse(source);
-  elements.content.innerHTML = DOMPurify.sanitize(html, {
-    USE_PROFILES: { html: true },
-  });
+  renderMarkdownInto(elements.content, source);
   addHeadingIds(elements.content);
   enhanceLinks(elements.content, doc);
+}
+
+function renderMarkdownInto(container, source) {
+  const html = marked.parse(source);
+  container.innerHTML = DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+  });
 }
 
 function renderPlainText(source) {
@@ -389,6 +459,270 @@ function enhanceLinks(container, doc) {
 
     anchor.href = toFetchUrl(resolveRelativeAssetPath(href, doc.path));
   });
+}
+
+function loadLlmConfig() {
+  const config = readStoredLlmConfig();
+  elements.llmBaseUrl.value = config.baseUrl;
+  elements.llmApiKey.value = config.apiKey;
+  elements.llmModel.value = config.model;
+  elements.llmTemperature.value = String(config.temperature);
+  elements.llmMaxTokens.value = String(config.maxTokens);
+  elements.llmMaxDocChars.value = String(config.maxDocChars);
+}
+
+function readStoredLlmConfig() {
+  try {
+    const rawConfig = localStorage.getItem(LLM_CONFIG_KEY);
+    if (!rawConfig) {
+      return { ...DEFAULT_LLM_CONFIG };
+    }
+
+    const parsed = JSON.parse(rawConfig);
+    return normalizeLlmConfig({
+      ...DEFAULT_LLM_CONFIG,
+      ...parsed,
+    });
+  } catch {
+    return { ...DEFAULT_LLM_CONFIG };
+  }
+}
+
+function saveLlmConfig() {
+  try {
+    const config = getLlmConfigFromForm();
+    localStorage.setItem(LLM_CONFIG_KEY, JSON.stringify(config));
+    setLlmStatus("配置已保存。");
+    return config;
+  } catch (error) {
+    setLlmStatus(error.message, "error");
+    throw error;
+  }
+}
+
+function clearLlmConfig() {
+  localStorage.removeItem(LLM_CONFIG_KEY);
+  loadLlmConfig();
+  setLlmStatus("配置已清除。");
+}
+
+function getLlmConfigFromForm() {
+  return normalizeLlmConfig({
+    baseUrl: elements.llmBaseUrl.value,
+    apiKey: elements.llmApiKey.value,
+    model: elements.llmModel.value,
+    temperature: elements.llmTemperature.value,
+    maxTokens: elements.llmMaxTokens.value,
+    maxDocChars: elements.llmMaxDocChars.value,
+  });
+}
+
+function normalizeLlmConfig(config) {
+  const normalized = {
+    baseUrl: String(config.baseUrl || "").trim().replace(/\/+$/, ""),
+    apiKey: String(config.apiKey || "").trim(),
+    model: String(config.model || "").trim(),
+    temperature: clampNumber(config.temperature, 0, 2, DEFAULT_LLM_CONFIG.temperature),
+    maxTokens: clampNumber(config.maxTokens, 128, 12000, DEFAULT_LLM_CONFIG.maxTokens),
+    maxDocChars: clampNumber(config.maxDocChars, 2000, 120000, DEFAULT_LLM_CONFIG.maxDocChars),
+  };
+
+  if (!normalized.baseUrl) {
+    throw new Error("请填写 API 地址。");
+  }
+  if (!normalized.model) {
+    throw new Error("请填写模型。");
+  }
+
+  return normalized;
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, number));
+}
+
+function openLlmPanel() {
+  closeSidebar();
+  document.body.classList.add("llm-open");
+  elements.llmPanel.setAttribute("aria-hidden", "false");
+  elements.llmPrompt.focus();
+}
+
+function closeLlmPanel() {
+  document.body.classList.remove("llm-open");
+  elements.llmPanel.setAttribute("aria-hidden", "true");
+}
+
+function setPromptTemplate(name) {
+  const prompt = LLM_PROMPTS[name] || LLM_PROMPTS.summary;
+  elements.llmPrompt.value = prompt;
+  elements.llmPrompts.querySelectorAll("[data-prompt]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.prompt === name);
+  });
+}
+
+async function runLlmAnalysis() {
+  if (!state.selectedDoc || !state.selectedDocSource) {
+    setLlmStatus("当前文档还没有加载完成。", "error");
+    return;
+  }
+
+  let config;
+  try {
+    config = saveLlmConfig();
+  } catch {
+    return;
+  }
+
+  const prompt = elements.llmPrompt.value.trim() || LLM_PROMPTS.summary;
+  const documentText = state.selectedDocSource.slice(0, config.maxDocChars);
+  const isTruncated = state.selectedDocSource.length > documentText.length;
+
+  state.llmAbortController = new AbortController();
+  setLlmBusy(true);
+  setLlmStatus(isTruncated ? `正在分析，已截取前 ${documentText.length} 字。` : "正在分析当前文档。");
+  elements.llmResult.replaceChildren();
+
+  try {
+    const response = await fetch(buildChatCompletionsUrl(config.baseUrl), {
+      method: "POST",
+      headers: buildLlmHeaders(config),
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          {
+            role: "system",
+            content: "你是一个严谨的中文学习文档分析助手。只根据用户提供的文档内容分析，不编造文档外事实。输出清晰的 Markdown。",
+          },
+          {
+            role: "user",
+            content: buildLlmUserPrompt(prompt, documentText, isTruncated),
+          },
+        ],
+        temperature: config.temperature,
+        max_tokens: config.maxTokens,
+        stream: false,
+      }),
+      signal: state.llmAbortController.signal,
+    });
+
+    const data = await readJsonResponse(response);
+    if (!response.ok) {
+      throw new Error(extractApiError(data) || `${response.status} ${response.statusText}`);
+    }
+
+    const content = extractCompletionContent(data);
+    if (!content) {
+      throw new Error("接口返回中没有可显示的内容。");
+    }
+
+    renderMarkdownInto(elements.llmResult, content);
+    const usage = data.usage?.total_tokens ? `总 token: ${data.usage.total_tokens}` : "分析完成。";
+    setLlmStatus(usage);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      setLlmStatus("已停止分析。");
+    } else {
+      setLlmStatus(formatLlmError(error), "error");
+    }
+  } finally {
+    state.llmAbortController = null;
+    setLlmBusy(false);
+  }
+}
+
+function stopLlmAnalysis() {
+  state.llmAbortController?.abort();
+}
+
+function buildChatCompletionsUrl(baseUrl) {
+  if (/\/chat\/completions$/i.test(baseUrl)) {
+    return baseUrl;
+  }
+  return `${baseUrl}/chat/completions`;
+}
+
+function buildLlmHeaders(config) {
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  if (config.apiKey) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+  return headers;
+}
+
+function buildLlmUserPrompt(prompt, documentText, isTruncated) {
+  const truncatedNote = isTruncated ? "\n注意：以下文档内容因长度限制被截断，只分析可见部分。\n" : "";
+  return [
+    `当前文件：${state.selectedPath}`,
+    truncatedNote,
+    "分析要求：",
+    prompt,
+    "",
+    "文档内容：",
+    "```markdown",
+    documentText,
+    "```",
+  ].join("\n");
+}
+
+async function readJsonResponse(response) {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (!response.ok) {
+      return { error: { message: text } };
+    }
+    throw new Error("接口返回的不是 JSON。");
+  }
+}
+
+function extractApiError(data) {
+  if (!data) {
+    return "";
+  }
+  if (typeof data.error === "string") {
+    return data.error;
+  }
+  return data.error?.message || data.message || "";
+}
+
+function extractCompletionContent(data) {
+  const choice = data?.choices?.[0];
+  const content = choice?.message?.content ?? choice?.text ?? data?.output_text;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => part.text || part.content || "")
+      .filter(Boolean)
+      .join("\n");
+  }
+  return typeof content === "string" ? content.trim() : "";
+}
+
+function formatLlmError(error) {
+  if (error instanceof TypeError && /fetch/i.test(error.message)) {
+    return "请求失败：请检查 API 地址、网络或接口 CORS 设置。";
+  }
+  return `请求失败：${error.message}`;
+}
+
+function setLlmBusy(isBusy) {
+  elements.llmRun.disabled = isBusy;
+  elements.llmStop.disabled = !isBusy;
+}
+
+function setLlmStatus(message, type = "") {
+  elements.llmStatus.textContent = message;
+  elements.llmStatus.dataset.type = type;
 }
 
 function resolveRelativeDocPath(href, currentPath) {

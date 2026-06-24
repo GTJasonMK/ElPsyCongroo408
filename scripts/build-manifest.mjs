@@ -27,7 +27,6 @@ await writeFile(
   path.join(ROOT, OUTPUT),
   `${JSON.stringify(
     {
-      generatedAt: new Date().toISOString(),
       rootTitle: "ElPsyCongroo408 文档",
       docs,
     },
