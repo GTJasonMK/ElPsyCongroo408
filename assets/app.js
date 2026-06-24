@@ -1,5 +1,6 @@
 import { marked } from "https://cdn.jsdelivr.net/npm/marked/lib/marked.esm.js";
 import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify/dist/purify.es.mjs";
+import katex from "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.mjs";
 
 const MANIFEST_URL = "./docs-manifest.json";
 const EXTERNAL_LINK_RE = /^(https?:|mailto:|tel:)/i;
@@ -37,7 +38,8 @@ const LLM_SYSTEM_PROMPT = [
   "7. 如果问题跨文档或需要未提供材料，说明当前只加载了当前文档，并基于当前文档给出有限结论。",
   "",
   "输出要求：",
-  "- 使用中文 Markdown。",
+  "- 直接输出中文 Markdown，不要把整段回答包在 ```markdown 代码块里。",
+  "- 公式使用 LaTeX Markdown 写法：行内公式用 `$...$`，独立公式用 `$$...$$`。",
   "- 内容要紧凑，避免重复整篇文档。",
   "- 不确定处明确标注，不做假确定。",
 ].join("\n");
@@ -106,7 +108,107 @@ marked.use({
   gfm: true,
   breaks: false,
   pedantic: false,
+  extensions: [
+    {
+      name: "mathBlock",
+      level: "block",
+      start(src) {
+        return src.indexOf("$$");
+      },
+      tokenizer(src) {
+        const match = /^\$\$[ \t]*\n?([\s\S]+?)\n?[ \t]*\$\$(?:\n+|$)/.exec(src);
+        if (!match) {
+          return;
+        }
+
+        return {
+          type: "mathBlock",
+          raw: match[0],
+          text: match[1].trim(),
+        };
+      },
+      renderer(token) {
+        return `<div class="math-display">${renderMath(token.text, true)}</div>`;
+      },
+    },
+    {
+      name: "mathInline",
+      level: "inline",
+      start(src) {
+        return src.indexOf("$");
+      },
+      tokenizer(src) {
+        const token = tokenizeInlineMath(src);
+        if (token) {
+          return token;
+        }
+      },
+      renderer(token) {
+        return `<span class="math-inline">${renderMath(token.text, false)}</span>`;
+      },
+    },
+  ],
 });
+
+function tokenizeInlineMath(src) {
+  if (!src.startsWith("$") || src.startsWith("$$")) {
+    return null;
+  }
+
+  const closingIndex = findClosingInlineMathDelimiter(src);
+  if (closingIndex < 2) {
+    return null;
+  }
+
+  const text = src.slice(1, closingIndex);
+  if (!text.trim() || /^\s|\s$/.test(text)) {
+    return null;
+  }
+
+  return {
+    type: "mathInline",
+    raw: src.slice(0, closingIndex + 1),
+    text,
+  };
+}
+
+function findClosingInlineMathDelimiter(src) {
+  for (let index = 1; index < src.length; index += 1) {
+    const char = src[index];
+    if (char === "\n") {
+      return -1;
+    }
+    if (char === "\\") {
+      index += 1;
+      continue;
+    }
+    if (char === "$") {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function renderMath(source, displayMode) {
+  try {
+    return katex.renderToString(source, {
+      displayMode,
+      output: "html",
+      throwOnError: false,
+    });
+  } catch {
+    return `<code>${escapeHtml(source)}</code>`;
+  }
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
 
 init().catch((error) => {
   showError("文档清单加载失败", error);
