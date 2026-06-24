@@ -4,6 +4,7 @@ import DOMPurify from "https://cdn.jsdelivr.net/npm/dompurify/dist/purify.es.mjs
 const MANIFEST_URL = "./docs-manifest.json";
 const EXTERNAL_LINK_RE = /^(https?:|mailto:|tel:)/i;
 const LLM_CONFIG_KEY = "elpsy-docs.llm.config.v1";
+const LLM_CHAT_KEY_PREFIX = "elpsy-docs.llm.chat.v1:";
 const DEFAULT_LLM_CONFIG = {
   baseUrl: "https://api.openai.com/v1",
   apiKey: "",
@@ -11,12 +12,14 @@ const DEFAULT_LLM_CONFIG = {
   temperature: 0.2,
   maxTokens: 1600,
   maxDocChars: 24000,
+  historyMessages: 12,
 };
 const LLM_PROMPTS = {
   summary: "请对当前文档做结构化学习分析：先概括核心主题，再列出关键知识点、推导线索、适用场景和复习优先级。输出中文 Markdown。",
   mistakes: "请分析当前文档中最容易混淆、漏条件或误用的点。按“易错点 -> 为什么错 -> 正确判断方式 -> 例题触发信号”的格式输出中文 Markdown。",
   quiz: "请基于当前文档生成自测题：包含基础题、辨析题和综合题，并在每题后给出简洁答案与解析。输出中文 Markdown。",
 };
+const LLM_SYSTEM_PROMPT = "你是一个严谨的中文学习文档分析助手。只根据提供的当前文档和对话上下文回答；如果文档里没有依据，直接说明无法从当前文档判断。输出清晰的 Markdown。";
 
 const elements = {
   breadcrumb: document.querySelector("#breadcrumb"),
@@ -26,19 +29,26 @@ const elements = {
   docTitle: document.querySelector("#doc-title"),
   llmApiKey: document.querySelector("#llm-api-key"),
   llmBaseUrl: document.querySelector("#llm-base-url"),
+  llmChatMessages: document.querySelector("#llm-chat-messages"),
+  llmClearChat: document.querySelector("#llm-clear-chat"),
   llmClearConfig: document.querySelector("#llm-clear-config"),
   llmClose: document.querySelector("#llm-close"),
   llmConfigForm: document.querySelector("#llm-config-form"),
+  llmContextLabel: document.querySelector("#llm-context-label"),
+  llmHistoryMessages: document.querySelector("#llm-history-messages"),
   llmMaxDocChars: document.querySelector("#llm-max-doc-chars"),
   llmMaxTokens: document.querySelector("#llm-max-tokens"),
+  llmMessageInput: document.querySelector("#llm-message-input"),
   llmModel: document.querySelector("#llm-model"),
   llmOpen: document.querySelector("#llm-open"),
   llmPanel: document.querySelector("#llm-panel"),
-  llmPrompt: document.querySelector("#llm-prompt"),
   llmPrompts: document.querySelector("#llm-prompts"),
-  llmResult: document.querySelector("#llm-result"),
-  llmRun: document.querySelector("#llm-run"),
   llmScrim: document.querySelector("#llm-scrim"),
+  llmSend: document.querySelector("#llm-send"),
+  llmSettingsClose: document.querySelector("#llm-settings-close"),
+  llmSettingsDialog: document.querySelector("#llm-settings-dialog"),
+  llmSettingsOpen: document.querySelector("#llm-settings-open"),
+  llmSettingsStatus: document.querySelector("#llm-settings-status"),
   llmStatus: document.querySelector("#llm-status"),
   llmStop: document.querySelector("#llm-stop"),
   llmTemperature: document.querySelector("#llm-temperature"),
@@ -59,6 +69,7 @@ const state = {
   docs: [],
   docsByPath: new Map(),
   expandedDirs: new Set(),
+  llmChatMessages: [],
   llmAbortController: null,
   manifest: null,
   query: "",
@@ -81,7 +92,7 @@ init().catch((error) => {
 async function init() {
   bindEvents();
   loadLlmConfig();
-  setPromptTemplate("summary");
+  setPromptTemplate("summary", { focus: false });
 
   const response = await fetch(MANIFEST_URL, { cache: "no-cache" });
   if (!response.ok) {
@@ -136,17 +147,27 @@ function bindEvents() {
   elements.llmOpen.addEventListener("click", openLlmPanel);
   elements.llmClose.addEventListener("click", closeLlmPanel);
   elements.llmScrim.addEventListener("click", closeLlmPanel);
+  elements.llmSettingsOpen.addEventListener("click", openLlmSettings);
+  elements.llmSettingsClose.addEventListener("click", closeLlmSettings);
   elements.llmConfigForm.addEventListener("submit", (event) => {
     event.preventDefault();
     try {
       saveLlmConfig();
+      closeLlmSettings();
     } catch {
       // saveLlmConfig already reports the validation error in the panel.
     }
   });
   elements.llmClearConfig.addEventListener("click", clearLlmConfig);
-  elements.llmRun.addEventListener("click", runLlmAnalysis);
+  elements.llmSend.addEventListener("click", sendLlmMessage);
   elements.llmStop.addEventListener("click", stopLlmAnalysis);
+  elements.llmClearChat.addEventListener("click", clearCurrentChat);
+  elements.llmMessageInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendLlmMessage();
+    }
+  });
   elements.llmPrompts.addEventListener("click", (event) => {
     const button = event.target.closest("[data-prompt]");
     if (!button) {
@@ -373,6 +394,8 @@ async function renderDocument(doc) {
     const source = await response.text();
     state.selectedDocSource = source;
     document.title = `${doc.title} - ElPsyCongroo408 文档`;
+    loadChatForCurrentDoc();
+    updateLlmContextLabel();
 
     if (doc.extension === ".txt") {
       renderPlainText(source);
@@ -469,6 +492,7 @@ function loadLlmConfig() {
   elements.llmTemperature.value = String(config.temperature);
   elements.llmMaxTokens.value = String(config.maxTokens);
   elements.llmMaxDocChars.value = String(config.maxDocChars);
+  elements.llmHistoryMessages.value = String(config.historyMessages);
 }
 
 function readStoredLlmConfig() {
@@ -492,10 +516,11 @@ function saveLlmConfig() {
   try {
     const config = getLlmConfigFromForm();
     localStorage.setItem(LLM_CONFIG_KEY, JSON.stringify(config));
-    setLlmStatus("配置已保存。");
+    setSettingsStatus("配置已保存。");
+    updateLlmContextLabel();
     return config;
   } catch (error) {
-    setLlmStatus(error.message, "error");
+    setSettingsStatus(error.message, "error");
     throw error;
   }
 }
@@ -503,7 +528,8 @@ function saveLlmConfig() {
 function clearLlmConfig() {
   localStorage.removeItem(LLM_CONFIG_KEY);
   loadLlmConfig();
-  setLlmStatus("配置已清除。");
+  setSettingsStatus("配置已清除。");
+  updateLlmContextLabel();
 }
 
 function getLlmConfigFromForm() {
@@ -514,6 +540,7 @@ function getLlmConfigFromForm() {
     temperature: elements.llmTemperature.value,
     maxTokens: elements.llmMaxTokens.value,
     maxDocChars: elements.llmMaxDocChars.value,
+    historyMessages: elements.llmHistoryMessages.value,
   });
 }
 
@@ -525,6 +552,7 @@ function normalizeLlmConfig(config) {
     temperature: clampNumber(config.temperature, 0, 2, DEFAULT_LLM_CONFIG.temperature),
     maxTokens: clampNumber(config.maxTokens, 128, 12000, DEFAULT_LLM_CONFIG.maxTokens),
     maxDocChars: clampNumber(config.maxDocChars, 2000, 120000, DEFAULT_LLM_CONFIG.maxDocChars),
+    historyMessages: clampNumber(config.historyMessages, 0, 40, DEFAULT_LLM_CONFIG.historyMessages),
   };
 
   if (!normalized.baseUrl) {
@@ -549,7 +577,7 @@ function openLlmPanel() {
   closeSidebar();
   document.body.classList.add("llm-open");
   elements.llmPanel.setAttribute("aria-hidden", "false");
-  elements.llmPrompt.focus();
+  elements.llmMessageInput.focus();
 }
 
 function closeLlmPanel() {
@@ -557,15 +585,29 @@ function closeLlmPanel() {
   elements.llmPanel.setAttribute("aria-hidden", "true");
 }
 
-function setPromptTemplate(name) {
+function openLlmSettings() {
+  if (!elements.llmSettingsDialog.open) {
+    elements.llmSettingsDialog.showModal();
+  }
+  elements.llmBaseUrl.focus();
+}
+
+function closeLlmSettings() {
+  elements.llmSettingsDialog.close();
+}
+
+function setPromptTemplate(name, options = {}) {
   const prompt = LLM_PROMPTS[name] || LLM_PROMPTS.summary;
-  elements.llmPrompt.value = prompt;
+  elements.llmMessageInput.value = prompt;
   elements.llmPrompts.querySelectorAll("[data-prompt]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.prompt === name);
   });
+  if (options.focus !== false) {
+    elements.llmMessageInput.focus();
+  }
 }
 
-async function runLlmAnalysis() {
+async function sendLlmMessage() {
   if (!state.selectedDoc || !state.selectedDocSource) {
     setLlmStatus("当前文档还没有加载完成。", "error");
     return;
@@ -573,19 +615,31 @@ async function runLlmAnalysis() {
 
   let config;
   try {
-    config = saveLlmConfig();
-  } catch {
+    config = getLlmConfigFromForm();
+  } catch (error) {
+    setLlmStatus(error.message, "error");
+    openLlmSettings();
     return;
   }
 
-  const prompt = elements.llmPrompt.value.trim() || LLM_PROMPTS.summary;
+  localStorage.setItem(LLM_CONFIG_KEY, JSON.stringify(config));
+  const userMessage = elements.llmMessageInput.value.trim();
+  if (!userMessage) {
+    setLlmStatus("请输入消息。", "error");
+    return;
+  }
+
   const documentText = state.selectedDocSource.slice(0, config.maxDocChars);
   const isTruncated = state.selectedDocSource.length > documentText.length;
+  const requestMessages = buildLlmMessages(config, userMessage, documentText, isTruncated);
 
   state.llmAbortController = new AbortController();
   setLlmBusy(true);
-  setLlmStatus(isTruncated ? `正在分析，已截取前 ${documentText.length} 字。` : "正在分析当前文档。");
-  elements.llmResult.replaceChildren();
+  setLlmStatus(isTruncated ? `正在请求，文档前缀 ${documentText.length} 字。` : "正在请求。");
+  appendChatMessage("user", userMessage);
+  elements.llmMessageInput.value = "";
+  const pendingMessage = appendChatMessage("assistant", "正在生成...");
+  saveCurrentChat();
 
   try {
     const response = await fetch(buildChatCompletionsUrl(config.baseUrl), {
@@ -593,16 +647,7 @@ async function runLlmAnalysis() {
       headers: buildLlmHeaders(config),
       body: JSON.stringify({
         model: config.model,
-        messages: [
-          {
-            role: "system",
-            content: "你是一个严谨的中文学习文档分析助手。只根据用户提供的文档内容分析，不编造文档外事实。输出清晰的 Markdown。",
-          },
-          {
-            role: "user",
-            content: buildLlmUserPrompt(prompt, documentText, isTruncated),
-          },
-        ],
+        messages: requestMessages,
         temperature: config.temperature,
         max_tokens: config.maxTokens,
         stream: false,
@@ -620,15 +665,18 @@ async function runLlmAnalysis() {
       throw new Error("接口返回中没有可显示的内容。");
     }
 
-    renderMarkdownInto(elements.llmResult, content);
-    const usage = data.usage?.total_tokens ? `总 token: ${data.usage.total_tokens}` : "分析完成。";
-    setLlmStatus(usage);
+    updateChatMessage(pendingMessage, content);
+    saveCurrentChat();
+    setLlmStatus(formatUsage(data.usage));
   } catch (error) {
     if (error.name === "AbortError") {
       setLlmStatus("已停止分析。");
+      removeChatMessage(pendingMessage);
     } else {
+      updateChatMessage(pendingMessage, `请求失败：${error.message}`);
       setLlmStatus(formatLlmError(error), "error");
     }
+    saveCurrentChat();
   } finally {
     state.llmAbortController = null;
     setLlmBusy(false);
@@ -656,19 +704,176 @@ function buildLlmHeaders(config) {
   return headers;
 }
 
-function buildLlmUserPrompt(prompt, documentText, isTruncated) {
+function buildLlmMessages(config, userMessage, documentText, isTruncated) {
+  const history =
+    config.historyMessages > 0 ? state.llmChatMessages.slice(-config.historyMessages) : [];
+  return [
+    {
+      role: "system",
+      content: LLM_SYSTEM_PROMPT,
+    },
+    {
+      role: "user",
+      content: buildDocumentContextMessage(documentText, isTruncated),
+    },
+    ...history.map((message) => ({
+      role: message.role,
+      content: message.content,
+    })),
+    {
+      role: "user",
+      content: userMessage,
+    },
+  ];
+}
+
+function buildDocumentContextMessage(documentText, isTruncated) {
   const truncatedNote = isTruncated ? "\n注意：以下文档内容因长度限制被截断，只分析可见部分。\n" : "";
   return [
     `当前文件：${state.selectedPath}`,
     truncatedNote,
-    "分析要求：",
-    prompt,
-    "",
     "文档内容：",
     "```markdown",
     documentText,
     "```",
   ].join("\n");
+}
+
+function loadChatForCurrentDoc() {
+  state.llmChatMessages = readStoredChatMessages(state.selectedPath);
+  renderChatMessages();
+}
+
+function readStoredChatMessages(path) {
+  if (!path) {
+    return [];
+  }
+  try {
+    const rawMessages = localStorage.getItem(getChatStorageKey(path));
+    const messages = rawMessages ? JSON.parse(rawMessages) : [];
+    if (!Array.isArray(messages)) {
+      return [];
+    }
+    return messages
+      .filter(isValidChatMessage)
+      .slice(-80)
+      .map((message, index) => ({
+        id: message.id || `${Date.now()}-${index}`,
+        role: message.role,
+        content: message.content,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function isValidChatMessage(message) {
+  return (
+    message &&
+    (message.role === "user" || message.role === "assistant") &&
+    typeof message.content === "string"
+  );
+}
+
+function saveCurrentChat() {
+  if (!state.selectedPath) {
+    return;
+  }
+  localStorage.setItem(getChatStorageKey(state.selectedPath), JSON.stringify(state.llmChatMessages.slice(-80)));
+}
+
+function getChatStorageKey(path) {
+  return `${LLM_CHAT_KEY_PREFIX}${encodeURIComponent(path)}`;
+}
+
+function renderChatMessages() {
+  elements.llmChatMessages.replaceChildren();
+  if (!state.llmChatMessages.length) {
+    const empty = document.createElement("div");
+    empty.className = "chat-empty";
+    empty.textContent = "可以直接询问当前文档。";
+    elements.llmChatMessages.append(empty);
+    return;
+  }
+
+  state.llmChatMessages.forEach((message) => {
+    elements.llmChatMessages.append(renderChatMessage(message));
+  });
+  scrollChatToBottom();
+}
+
+function appendChatMessage(role, content) {
+  const message = {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    role,
+    content,
+  };
+  state.llmChatMessages.push(message);
+  if (elements.llmChatMessages.querySelector(".chat-empty")) {
+    elements.llmChatMessages.replaceChildren();
+  }
+  elements.llmChatMessages.append(renderChatMessage(message));
+  scrollChatToBottom();
+  return message;
+}
+
+function updateChatMessage(message, content) {
+  message.content = content;
+  const bubble = elements.llmChatMessages.querySelector(`[data-message-id="${message.id}"]`);
+  if (!bubble) {
+    renderChatMessages();
+    return;
+  }
+  const body = bubble.querySelector(".chat-message-body");
+  renderMarkdownInto(body, content);
+  scrollChatToBottom();
+}
+
+function removeChatMessage(message) {
+  state.llmChatMessages = state.llmChatMessages.filter((item) => item.id !== message.id);
+  renderChatMessages();
+}
+
+function renderChatMessage(message) {
+  const item = document.createElement("article");
+  item.className = `chat-message is-${message.role}`;
+  item.dataset.messageId = message.id;
+
+  const label = document.createElement("div");
+  label.className = "chat-message-label";
+  label.textContent = message.role === "user" ? "你" : "AI";
+
+  const body = document.createElement("div");
+  body.className = "chat-message-body markdown-body";
+  renderMarkdownInto(body, message.content);
+
+  item.append(label, body);
+  return item;
+}
+
+function clearCurrentChat() {
+  state.llmChatMessages = [];
+  if (state.selectedPath) {
+    localStorage.removeItem(getChatStorageKey(state.selectedPath));
+  }
+  renderChatMessages();
+  setLlmStatus("当前文档对话已清空。");
+}
+
+function scrollChatToBottom() {
+  elements.llmChatMessages.scrollTop = elements.llmChatMessages.scrollHeight;
+}
+
+function updateLlmContextLabel() {
+  if (!state.selectedDoc) {
+    elements.llmContextLabel.textContent = "等待文档加载";
+    return;
+  }
+  const config = readStoredLlmConfig();
+  const sourceLength = state.selectedDocSource.length;
+  const contextLength = Math.min(sourceLength, config.maxDocChars);
+  const suffix = sourceLength > contextLength ? `前 ${contextLength} 字` : `${contextLength} 字`;
+  elements.llmContextLabel.textContent = `${state.selectedDoc.title} · 文档上下文 ${suffix}`;
 }
 
 async function readJsonResponse(response) {
@@ -715,14 +920,30 @@ function formatLlmError(error) {
   return `请求失败：${error.message}`;
 }
 
+function formatUsage(usage) {
+  if (!usage) {
+    return "完成。";
+  }
+  const total = usage.total_tokens ? `总 token ${usage.total_tokens}` : "";
+  const cached = usage.prompt_tokens_details?.cached_tokens
+    ? `缓存命中 ${usage.prompt_tokens_details.cached_tokens}`
+    : "";
+  return [total, cached].filter(Boolean).join("，") || "完成。";
+}
+
 function setLlmBusy(isBusy) {
-  elements.llmRun.disabled = isBusy;
+  elements.llmSend.disabled = isBusy;
   elements.llmStop.disabled = !isBusy;
 }
 
 function setLlmStatus(message, type = "") {
   elements.llmStatus.textContent = message;
   elements.llmStatus.dataset.type = type;
+}
+
+function setSettingsStatus(message, type = "") {
+  elements.llmSettingsStatus.textContent = message;
+  elements.llmSettingsStatus.dataset.type = type;
 }
 
 function resolveRelativeDocPath(href, currentPath) {

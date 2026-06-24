@@ -51,69 +51,87 @@
       </div>
     </div>
     <button class="scrim" id="scrim" type="button" aria-label="关闭目录"></button>
-    <button class="llm-scrim" id="llm-scrim" type="button" aria-label="关闭 AI 分析"></button>
-    <section class="llm-panel" id="llm-panel" aria-label="AI 分析" aria-hidden="true">
+    <button class="llm-scrim" id="llm-scrim" type="button" aria-label="关闭 AI 对话"></button>
+    <section class="llm-panel" id="llm-panel" aria-label="AI 对话" aria-hidden="true">
       <header class="llm-header">
         <div>
-          <h2>AI分析</h2>
-          <p>配置保存在当前浏览器</p>
+          <h2>当前文档对话</h2>
+          <p id="llm-context-label">等待文档加载</p>
         </div>
-        <button class="icon-button" id="llm-close" type="button" aria-label="关闭 AI 分析" title="关闭">关闭</button>
+        <div class="llm-header-actions">
+          <button class="action-button" id="llm-settings-open" type="button">设置</button>
+          <button class="action-button" id="llm-close" type="button" aria-label="关闭 AI 对话" title="关闭">关闭</button>
+        </div>
       </header>
 
       <div class="llm-panel-body">
-        <form class="llm-config" id="llm-config-form">
-          <div class="form-grid">
-            <label class="form-field">
-              <span>API 地址</span>
-              <input id="llm-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" />
-            </label>
-            <label class="form-field">
-              <span>API Key</span>
-              <input id="llm-api-key" type="password" autocomplete="off" />
-            </label>
-            <label class="form-field">
-              <span>模型</span>
-              <input id="llm-model" type="text" placeholder="gpt-4o-mini" autocomplete="off" />
-            </label>
-            <label class="form-field">
-              <span>温度</span>
-              <input id="llm-temperature" type="number" min="0" max="2" step="0.1" />
-            </label>
-            <label class="form-field">
-              <span>最大输出</span>
-              <input id="llm-max-tokens" type="number" min="128" max="12000" step="128" />
-            </label>
-            <label class="form-field">
-              <span>文档上限</span>
-              <input id="llm-max-doc-chars" type="number" min="2000" max="120000" step="1000" />
-            </label>
-          </div>
-          <div class="llm-config-actions">
-            <button class="action-button primary-action" type="submit">保存配置</button>
-            <button class="action-button" id="llm-clear-config" type="button">清除配置</button>
-          </div>
-        </form>
+        <div class="llm-chat" id="llm-chat-messages" aria-live="polite"></div>
+      </div>
 
+      <footer class="llm-composer">
         <div class="llm-prompts" id="llm-prompts" role="group" aria-label="分析模板">
           <button class="prompt-chip is-active" type="button" data-prompt="summary">总结重点</button>
           <button class="prompt-chip" type="button" data-prompt="mistakes">易错点</button>
           <button class="prompt-chip" type="button" data-prompt="quiz">出题自测</button>
         </div>
 
-        <label class="form-field prompt-field">
-          <span>分析要求</span>
-          <textarea id="llm-prompt" rows="5"></textarea>
+        <label class="form-field prompt-field" for="llm-message-input">
+          <span>消息</span>
+          <textarea id="llm-message-input" rows="3" placeholder="询问当前文档，Enter 发送，Shift+Enter 换行"></textarea>
         </label>
 
         <div class="llm-runbar">
-          <button class="action-button primary-action" id="llm-run" type="button">分析当前文档</button>
+          <button class="action-button primary-action" id="llm-send" type="button">发送</button>
           <button class="action-button" id="llm-stop" type="button" disabled>停止</button>
+          <button class="action-button" id="llm-clear-chat" type="button">清空</button>
         </div>
         <div class="llm-status" id="llm-status" role="status" aria-live="polite"></div>
-        <article class="markdown-body llm-result" id="llm-result"></article>
-      </div>
+      </footer>
     </section>
+
+    <dialog class="llm-settings-dialog" id="llm-settings-dialog" aria-label="AI 设置">
+      <form class="llm-config" id="llm-config-form" method="dialog">
+        <header class="settings-header">
+          <h2>AI 设置</h2>
+          <button class="action-button" id="llm-settings-close" type="button">关闭</button>
+        </header>
+        <div class="form-grid">
+          <label class="form-field">
+            <span>API 地址</span>
+            <input id="llm-base-url" type="url" placeholder="https://api.openai.com/v1" autocomplete="off" />
+          </label>
+          <label class="form-field">
+            <span>API Key</span>
+            <input id="llm-api-key" type="password" autocomplete="off" />
+          </label>
+          <label class="form-field">
+            <span>模型</span>
+            <input id="llm-model" type="text" placeholder="gpt-4o-mini" autocomplete="off" />
+          </label>
+          <label class="form-field">
+            <span>温度</span>
+            <input id="llm-temperature" type="number" min="0" max="2" step="0.1" />
+          </label>
+          <label class="form-field">
+            <span>最大输出</span>
+            <input id="llm-max-tokens" type="number" min="128" max="12000" step="128" />
+          </label>
+          <label class="form-field">
+            <span>文档上限</span>
+            <input id="llm-max-doc-chars" type="number" min="2000" max="120000" step="1000" />
+          </label>
+          <label class="form-field">
+            <span>历史消息</span>
+            <input id="llm-history-messages" type="number" min="0" max="40" step="2" />
+          </label>
+        </div>
+        <div class="llm-config-actions">
+          <button class="action-button primary-action" type="submit">保存配置</button>
+          <button class="action-button" id="llm-clear-config" type="button">清除配置</button>
+        </div>
+        <div class="llm-status" id="llm-settings-status" role="status" aria-live="polite"></div>
+      </form>
+    </dialog>
     <script type="module" src="./assets/app.js"></script>
   </body>
 </html>
