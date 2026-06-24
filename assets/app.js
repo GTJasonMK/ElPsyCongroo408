@@ -6,14 +6,20 @@ const EXTERNAL_LINK_RE = /^(https?:|mailto:|tel:)/i;
 const LLM_CONFIG_KEY = "elpsy-docs.llm.config.v1";
 const LLM_CHAT_KEY_PREFIX = "elpsy-docs.llm.chat.v1:";
 const DEFAULT_LLM_CONFIG = {
-  baseUrl: "https://api.openai.com/v1",
+  baseUrl: "https://api.deepseek.com",
   apiKey: "",
-  model: "",
+  model: "deepseek-v4-flash",
   temperature: 0.2,
   maxTokens: 1600,
   maxDocChars: 24000,
   historyMessages: 12,
 };
+const LEGACY_DEFAULT_BASE_URLS = new Set([
+  "",
+  "https://api.openai.com/v1",
+  "https://api.deepseek.com/v1",
+]);
+const LEGACY_DEFAULT_MODELS = new Set(["", "gpt-4o-mini", "deepseek-chat"]);
 const LLM_PROMPTS = {
   summary: "请对当前文档做结构化学习分析：先概括核心主题，再列出关键知识点、推导线索、适用场景和复习优先级。输出中文 Markdown。",
   mistakes: "请分析当前文档中最容易混淆、漏条件或误用的点。按“易错点 -> 为什么错 -> 正确判断方式 -> 例题触发信号”的格式输出中文 Markdown。",
@@ -507,13 +513,32 @@ function readStoredLlmConfig() {
     }
 
     const parsed = JSON.parse(rawConfig);
+    const migrated = migrateLegacyDefaultConfig(parsed);
     return normalizeLlmConfig({
       ...DEFAULT_LLM_CONFIG,
-      ...parsed,
+      ...migrated,
     });
   } catch {
     return { ...DEFAULT_LLM_CONFIG };
   }
+}
+
+function migrateLegacyDefaultConfig(config) {
+  if (config.apiKey) {
+    return config;
+  }
+
+  const baseUrl = String(config.baseUrl || "").trim().replace(/\/+$/, "");
+  const model = String(config.model || "").trim();
+  if (LEGACY_DEFAULT_BASE_URLS.has(baseUrl) && LEGACY_DEFAULT_MODELS.has(model)) {
+    return {
+      ...config,
+      baseUrl: DEFAULT_LLM_CONFIG.baseUrl,
+      model: DEFAULT_LLM_CONFIG.model,
+    };
+  }
+
+  return config;
 }
 
 function saveLlmConfig() {
