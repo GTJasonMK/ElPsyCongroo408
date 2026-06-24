@@ -914,10 +914,15 @@ body.llm-open .llm-panel {
   }
 
   .llm-panel {
-    right: 10px;
-    bottom: 10px;
-    width: calc(100vw - 20px);
-    height: min(760px, calc(100vh - 20px));
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 50vh;
+    height: 50dvh;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 12px 12px 0 0;
     transform-origin: center bottom;
   }
 
@@ -937,16 +942,76 @@ body.llm-open .llm-panel {
   .llm-header,
   .llm-chat,
   .llm-composer {
-    padding-right: 16px;
-    padding-left: 16px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .llm-header {
+    align-items: center;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .llm-header h2 {
+    font-size: 16px;
+  }
+
+  .llm-header p {
+    font-size: 12px;
+  }
+
+  .llm-header-actions .action-button {
+    min-height: 32px;
+    padding: 0 9px;
+  }
+
+  .llm-chat {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .llm-composer {
+    padding-top: 10px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
   }
 
   .chat-message-body {
     max-width: 100%;
   }
 
-  .llm-header-actions .action-button {
-    padding: 0 9px;
+  .llm-prompts {
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .prompt-chip {
+    min-height: 30px;
+    font-size: 13px;
+  }
+
+  .llm-composer .form-field span {
+    display: none;
+  }
+
+  .llm-composer .form-field textarea {
+    min-height: 58px;
+    resize: none;
+  }
+
+  .llm-runbar {
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .llm-runbar .action-button {
+    min-height: 32px;
+    padding: 0 8px;
+  }
+
+  .llm-status {
+    min-height: 18px;
+    margin: 6px 0 0;
+    font-size: 12px;
   }
 
   .llm-settings-dialog {
