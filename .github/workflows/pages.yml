@@ -19,12 +19,17 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PAGES_ENABLEMENT_TOKEN: ${{ secrets.PAGES_ENABLEMENT_TOKEN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
+        with:
+          enablement: ${{ env.PAGES_ENABLEMENT_TOKEN != '' }}
+          token: ${{ env.PAGES_ENABLEMENT_TOKEN != '' && env.PAGES_ENABLEMENT_TOKEN || github.token }}
 
       - name: Build manifest
         run: node scripts/build-manifest.mjs
@@ -40,7 +45,7 @@ jobs:
             ./ _site/
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: _site
 
@@ -53,4 +58,4 @@ jobs:
     steps:
       - name: Deploy
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
