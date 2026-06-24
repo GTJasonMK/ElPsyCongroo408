@@ -748,9 +748,17 @@ body.llm-open .llm-panel {
   margin-top: 12px;
 }
 
+.llm-config-actions {
+  flex-wrap: wrap;
+}
+
 .llm-config-actions .action-button,
 .llm-runbar .action-button {
   flex: 1;
+}
+
+.llm-config-actions .action-button {
+  min-width: min(100%, 132px);
 }
 
 .llm-prompts {

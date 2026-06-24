@@ -36,6 +36,7 @@ const elements = {
   llmBaseUrl: document.querySelector("#llm-base-url"),
   llmChatMessages: document.querySelector("#llm-chat-messages"),
   llmClearChat: document.querySelector("#llm-clear-chat"),
+  llmClearCurrentChat: document.querySelector("#llm-clear-current-chat"),
   llmClearConfig: document.querySelector("#llm-clear-config"),
   llmClose: document.querySelector("#llm-close"),
   llmConfigForm: document.querySelector("#llm-config-form"),
@@ -167,6 +168,7 @@ function bindEvents() {
     }
   });
   elements.llmClearConfig.addEventListener("click", clearLlmConfig);
+  elements.llmClearCurrentChat.addEventListener("click", () => clearCurrentChat({ fromSettings: true }));
   elements.llmSend.addEventListener("click", sendLlmMessage);
   elements.llmStop.addEventListener("click", stopLlmAnalysis);
   elements.llmClearChat.addEventListener("click", clearCurrentChat);
@@ -882,13 +884,25 @@ function renderChatMessage(message) {
   return item;
 }
 
-function clearCurrentChat() {
-  state.llmChatMessages = [];
-  if (state.selectedPath) {
-    localStorage.removeItem(getChatStorageKey(state.selectedPath));
+function clearCurrentChat(options = {}) {
+  if (!state.selectedPath) {
+    const message = "当前没有可清除的文档对话。";
+    setLlmStatus(message, "error");
+    if (options.fromSettings) {
+      setSettingsStatus(message, "error");
+    }
+    return;
   }
+
+  state.llmChatMessages = [];
+  localStorage.removeItem(getChatStorageKey(state.selectedPath));
   renderChatMessages();
-  setLlmStatus("当前文档对话已清空。");
+
+  const message = "当前文档对话已清空。";
+  setLlmStatus(message);
+  if (options.fromSettings) {
+    setSettingsStatus(message);
+  }
 }
 
 function scrollChatToBottom() {

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ElPsyCongroo408 文档</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="./assets/styles.css?v=20260624-ai-settings-sheet" />
+    <link rel="stylesheet" href="./assets/styles.css?v=20260624-clear-doc-chat" />
   </head>
   <body>
     <div class="app-shell">
@@ -125,11 +125,20 @@
         </div>
         <div class="llm-config-actions">
           <button class="action-button primary-action" type="submit">保存配置</button>
+          <button
+            class="action-button"
+            id="llm-clear-current-chat"
+            type="button"
+            aria-label="清除当前文档对话记录"
+            title="只清除当前文档的对话记录"
+          >
+            清除当前对话
+          </button>
           <button class="action-button" id="llm-clear-config" type="button">清除配置</button>
         </div>
         <div class="llm-status" id="llm-settings-status" role="status" aria-live="polite"></div>
       </form>
     </dialog>
-    <script type="module" src="./assets/app.js?v=20260624-full-doc-context"></script>
+    <script type="module" src="./assets/app.js?v=20260624-clear-doc-chat"></script>
   </body>
 </html>
