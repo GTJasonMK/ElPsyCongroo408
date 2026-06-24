@@ -49,6 +49,7 @@ const elements = {
   llmSettingsClose: document.querySelector("#llm-settings-close"),
   llmSettingsDialog: document.querySelector("#llm-settings-dialog"),
   llmSettingsOpen: document.querySelector("#llm-settings-open"),
+  llmSettingsToolbar: document.querySelector("#llm-settings-toolbar"),
   llmSettingsStatus: document.querySelector("#llm-settings-status"),
   llmStatus: document.querySelector("#llm-status"),
   llmStop: document.querySelector("#llm-stop"),
@@ -150,6 +151,7 @@ function bindEvents() {
   elements.llmClose.addEventListener("click", closeLlmPanel);
   elements.llmScrim.addEventListener("click", closeLlmPanel);
   elements.llmSettingsOpen.addEventListener("click", openLlmSettings);
+  elements.llmSettingsToolbar.addEventListener("click", openLlmSettings);
   elements.llmSettingsClose.addEventListener("click", closeLlmSettings);
   elements.llmConfigForm.addEventListener("submit", (event) => {
     event.preventDefault();
