@@ -74,9 +74,10 @@ async function walk(directory, relativeDirectory) {
 
     const fileStat = await stat(absolutePath);
     const segments = relativePath.split("/");
+    const rawTitle = toTitle(entry.name, extension);
     docs.push({
       path: relativePath,
-      title: toTitle(entry.name, extension),
+      title: toDisplayTitle(rawTitle, segments),
       extension,
       size: fileStat.size,
       modifiedAt: fileStat.mtime.toISOString(),
@@ -87,4 +88,40 @@ async function walk(directory, relativeDirectory) {
 
 function toTitle(filename, extension) {
   return filename.slice(0, -extension.length).trim() || filename;
+}
+
+function toDisplayTitle(title, segments) {
+  const parent = segments.length > 1 ? cleanName(segments.at(-2)) : "";
+  let displayTitle = cleanName(title)
+    .replace(/[.。．]?精细知识点$/u, "")
+    .trim();
+
+  displayTitle = stripPrefix(displayTitle, parent);
+  displayTitle = stripPrefix(displayTitle, "30讲零基础");
+  displayTitle = stripPrefix(displayTitle, "基础30讲");
+  displayTitle = moveTrailingIndexToFront(displayTitle);
+
+  return displayTitle || cleanName(title);
+}
+
+function cleanName(value) {
+  return String(value).replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function stripPrefix(value, prefix) {
+  const normalizedPrefix = cleanName(prefix);
+  if (!normalizedPrefix || !value.startsWith(normalizedPrefix)) {
+    return value;
+  }
+  return value.slice(normalizedPrefix.length).trim();
+}
+
+function moveTrailingIndexToFront(value) {
+  const match = /^(.+?)(\d{2})$/u.exec(value);
+  if (!match) {
+    return value;
+  }
+
+  const [, name, index] = match;
+  return `${index} ${name.trim()}`;
 }

@@ -217,7 +217,6 @@ init().catch((error) => {
 async function init() {
   bindEvents();
   loadLlmConfig();
-  setPromptTemplate("summary", { focus: false });
 
   const response = await fetch(MANIFEST_URL, { cache: "no-cache" });
   if (!response.ok) {
@@ -401,7 +400,9 @@ function renderTree() {
 }
 
 function renderSearchResults() {
-  const results = state.docs.filter((doc) => doc.path.toLowerCase().includes(state.query));
+  const results = state.docs.filter(
+    (doc) => doc.path.toLowerCase().includes(state.query) || doc.title.toLowerCase().includes(state.query),
+  );
 
   if (!results.length) {
     elements.tree.append(emptyNode("没有匹配结果"));
@@ -410,7 +411,7 @@ function renderSearchResults() {
 
   const fragment = document.createDocumentFragment();
   results.forEach((doc) => {
-    fragment.append(renderFileButton(doc, doc.path));
+    fragment.append(renderFileButton(doc, doc.title));
   });
   elements.tree.append(fragment);
 }
