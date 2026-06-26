@@ -350,9 +350,11 @@ a {
 }
 
 .markdown-body {
+  width: 100%;
   max-width: 960px;
+  min-width: 0;
   margin: 0 auto;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   color: var(--text);
 }
 
@@ -445,26 +447,41 @@ a {
 .markdown-body .math-inline {
   display: inline-block;
   max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   vertical-align: middle;
 }
 
 .markdown-body .math-display {
   display: block;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
   margin: 0 0 1.05em;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0.2em 0;
+  -webkit-overflow-scrolling: touch;
 }
 
 .markdown-body .math-display .katex-display {
+  width: max-content;
+  min-width: 100%;
   margin: 0.35em 0;
 }
 
 .markdown-body .katex {
   font-size: 1.02em;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.markdown-body .math-inline .katex {
+  display: inline-block;
+  min-width: max-content;
 }
 
 .markdown-body table {
@@ -655,6 +672,7 @@ body.llm-open .llm-panel {
 .chat-message {
   display: grid;
   gap: 6px;
+  min-width: 0;
   margin-bottom: 16px;
 }
 
@@ -666,6 +684,9 @@ body.llm-open .llm-panel {
 
 .chat-message-body {
   max-width: 92%;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
