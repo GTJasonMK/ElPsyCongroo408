@@ -7,7 +7,10 @@ const EXTERNAL_LINK_RE = /^(https?:|mailto:|tel:)/i;
 const LLM_CONFIG_KEY = "elpsy-docs.llm.config.v1";
 const LLM_CHAT_KEY_PREFIX = "elpsy-docs.llm.chat.v1:";
 const LLM_CHAT_STORAGE_VERSION = 2;
+const READING_PROGRESS_KEY = "elpsy-docs.reading-progress.v1";
 const CHAT_BOTTOM_THRESHOLD = 72;
+const READING_COMPLETE_THRESHOLD = 98;
+const READING_SCROLL_SAVE_DELTA = 24;
 const DEFAULT_LLM_CONFIG = {
   baseUrl: "https://api.deepseek.com",
   apiKey: "",
@@ -51,6 +54,7 @@ const elements = {
   content: document.querySelector("#content"),
   copyLink: document.querySelector("#copy-link"),
   docCount: document.querySelector("#doc-count"),
+  docProgress: document.querySelector("#doc-progress"),
   docTitle: document.querySelector("#doc-title"),
   llmApiKey: document.querySelector("#llm-api-key"),
   llmBaseUrl: document.querySelector("#llm-base-url"),
@@ -104,6 +108,8 @@ const state = {
   llmRenderFrame: 0,
   llmShouldAutoScroll: true,
   manifest: null,
+  progressFrame: 0,
+  readingProgress: new Map(),
   query: "",
   selectedDoc: null,
   selectedDocSource: "",
@@ -226,8 +232,12 @@ init().catch((error) => {
 });
 
 async function init() {
+  if ("scrollRestoration" in history) {
+    history.scrollRestoration = "manual";
+  }
   bindEvents();
   loadLlmConfig();
+  state.readingProgress = readStoredReadingProgress();
 
   const response = await fetch(MANIFEST_URL, { cache: "no-cache" });
   if (!response.ok) {
@@ -239,7 +249,7 @@ async function init() {
   state.docsByPath = new Map(state.docs.map((doc) => [doc.path, doc]));
   state.tree = buildTree(state.docs);
 
-  elements.docCount.textContent = `${state.docs.length} 个文档`;
+  updateDocCount();
   expandInitialDirs();
   renderTree();
 
@@ -255,6 +265,15 @@ function bindEvents() {
     const path = getPathFromHash();
     if (path && path !== state.selectedPath && state.docsByPath.has(path)) {
       selectDoc(path, { fromHash: true });
+    }
+  });
+
+  window.addEventListener("scroll", scheduleReadingProgressUpdate, { passive: true });
+  window.addEventListener("resize", scheduleReadingProgressUpdate);
+  window.addEventListener("beforeunload", () => recordReadingProgress({ force: true }));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      recordReadingProgress({ force: true });
     }
   });
 
@@ -443,8 +462,8 @@ function renderTreeNode(node) {
   button.className = "tree-button tree-folder";
   button.setAttribute("aria-expanded", String(isExpanded));
   button.title = node.path;
-  button.innerHTML = `<span class="tree-icon" aria-hidden="true">&gt;</span><span></span>`;
-  button.lastElementChild.textContent = node.name;
+  button.innerHTML = `<span class="tree-icon" aria-hidden="true">&gt;</span><span class="tree-label"></span>`;
+  button.querySelector(".tree-label").textContent = node.name;
   button.addEventListener("click", () => {
     if (isExpanded) {
       state.expandedDirs.delete(node.path);
@@ -473,14 +492,36 @@ function renderFileButton(doc, label) {
   button.className = "tree-button tree-file";
   button.dataset.path = doc.path;
   button.title = doc.path;
-  button.innerHTML = `<span class="tree-icon" aria-hidden="true">-</span><span></span>`;
-  button.lastElementChild.textContent = label;
+  button.innerHTML = `<span class="tree-icon" aria-hidden="true">-</span><span class="tree-label"></span><span class="tree-progress"></span>`;
+  button.querySelector(".tree-label").textContent = label;
   button.classList.toggle("is-active", doc.path === state.selectedPath);
+  updateTreeFileProgress(button, doc.path);
   button.addEventListener("click", () => {
     selectDoc(doc.path);
     closeSidebar();
   });
   return button;
+}
+
+function updateTreeFileProgress(button, path) {
+  const progress = getReadingProgress(path);
+  const percent = getReadingProgressPercent(progress);
+  const progressLabel = button.querySelector(".tree-progress");
+  button.classList.toggle("is-started", percent > 0);
+  button.classList.toggle("is-complete", percent >= READING_COMPLETE_THRESHOLD);
+  button.dataset.progress = String(percent);
+  if (progressLabel) {
+    progressLabel.textContent = percent > 0 ? formatReadingProgress(percent) : "";
+    progressLabel.title = percent > 0 ? `阅读进度 ${percent}%` : "";
+  }
+}
+
+function updateTreeProgressForPath(path) {
+  elements.tree.querySelectorAll(".tree-file").forEach((button) => {
+    if (button.dataset.path === path) {
+      updateTreeFileProgress(button, path);
+    }
+  });
 }
 
 function emptyNode(message) {
@@ -496,6 +537,9 @@ async function selectDoc(path, options = {}) {
     return;
   }
 
+  if (state.selectedPath && state.selectedPath !== path) {
+    recordReadingProgress({ force: true });
+  }
   state.selectedPath = path;
   state.selectedDoc = doc;
   expandDirsForPath(path);
@@ -522,6 +566,7 @@ function updateHeader(doc) {
   elements.docTitle.textContent = doc.title;
   elements.breadcrumb.textContent = doc.segments.slice(0, -1).join(" / ");
   elements.rawLink.href = toFetchUrl(doc.path);
+  updateDocProgressUI();
 }
 
 async function renderDocument(doc) {
@@ -545,7 +590,7 @@ async function renderDocument(doc) {
       renderMarkdown(source, doc);
     }
 
-    window.scrollTo({ top: 0, behavior: "auto" });
+    restoreReadingProgressForCurrentDoc();
   } catch (error) {
     showError("文档读取失败", error);
   }
@@ -673,6 +718,198 @@ function renderPlainText(source) {
   code.textContent = source;
   pre.append(code);
   elements.content.append(pre);
+}
+
+function readStoredReadingProgress() {
+  try {
+    const rawProgress = localStorage.getItem(READING_PROGRESS_KEY);
+    if (!rawProgress) {
+      return new Map();
+    }
+
+    const parsed = JSON.parse(rawProgress);
+    const docs = parsed?.docs && typeof parsed.docs === "object" ? parsed.docs : {};
+    return new Map(
+      Object.entries(docs)
+        .filter(([path, progress]) => typeof path === "string" && isValidReadingProgress(progress))
+        .map(([path, progress]) => [path, normalizeReadingProgress(progress)]),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+function isValidReadingProgress(progress) {
+  return progress && typeof progress === "object";
+}
+
+function normalizeReadingProgress(progress) {
+  const maxPercent = clampNumber(progress.maxPercent ?? progress.percent, 0, 100, 0);
+  return {
+    maxPercent: roundReadingPercent(maxPercent),
+    currentPercent: roundReadingPercent(clampNumber(progress.currentPercent, 0, 100, maxPercent)),
+    scrollY: Math.round(clampNumber(progress.scrollY, 0, Number.MAX_SAFE_INTEGER, 0)),
+    updatedAt: typeof progress.updatedAt === "string" ? progress.updatedAt : "",
+    completedAt: typeof progress.completedAt === "string" ? progress.completedAt : "",
+  };
+}
+
+function saveStoredReadingProgress() {
+  const docs = {};
+  state.readingProgress.forEach((progress, path) => {
+    if (!state.docsByPath.size || state.docsByPath.has(path)) {
+      docs[path] = progress;
+    }
+  });
+  localStorage.setItem(
+    READING_PROGRESS_KEY,
+    JSON.stringify({
+      version: 1,
+      docs,
+    }),
+  );
+}
+
+function scheduleReadingProgressUpdate() {
+  if (state.progressFrame) {
+    return;
+  }
+
+  state.progressFrame = requestAnimationFrame(() => {
+    state.progressFrame = 0;
+    recordReadingProgress();
+  });
+}
+
+function recordReadingProgress(options = {}) {
+  if (!state.selectedPath || !state.selectedDoc || !elements.content.childElementCount) {
+    return;
+  }
+
+  const measured = measureReadingProgress();
+  if (!measured) {
+    return;
+  }
+
+  const previous = getReadingProgress(state.selectedPath);
+  const maxPercent = Math.max(previous?.maxPercent || 0, measured.percent);
+  const next = {
+    maxPercent: roundReadingPercent(maxPercent),
+    currentPercent: roundReadingPercent(measured.percent),
+    scrollY: Math.round(measured.scrollY),
+    updatedAt: new Date().toISOString(),
+    completedAt:
+      maxPercent >= READING_COMPLETE_THRESHOLD
+        ? previous?.completedAt || new Date().toISOString()
+        : previous?.completedAt || "",
+  };
+
+  if (!options.force && !shouldPersistReadingProgress(previous, next)) {
+    updateDocProgressUI(next);
+    return;
+  }
+
+  state.readingProgress.set(state.selectedPath, next);
+  saveStoredReadingProgress();
+  updateDocProgressUI(next);
+  updateTreeProgressForPath(state.selectedPath);
+  updateDocCount();
+}
+
+function measureReadingProgress() {
+  const contentHeight = elements.content.scrollHeight;
+  if (!contentHeight) {
+    return null;
+  }
+
+  const scrollY = window.scrollY || window.pageYOffset || 0;
+  const contentTop = scrollY + elements.content.getBoundingClientRect().top;
+  const viewportBottom = scrollY + window.innerHeight;
+  const percent = clampNumber(((viewportBottom - contentTop) / contentHeight) * 100, 0, 100, 0);
+  return {
+    percent,
+    scrollY,
+  };
+}
+
+function shouldPersistReadingProgress(previous, next) {
+  if (!previous) {
+    return next.maxPercent > 0 || next.scrollY > 0;
+  }
+
+  return (
+    getReadingProgressPercent(previous) !== getReadingProgressPercent(next) ||
+    Math.round(previous.currentPercent) !== Math.round(next.currentPercent) ||
+    Math.abs(previous.scrollY - next.scrollY) >= READING_SCROLL_SAVE_DELTA ||
+    previous.completedAt !== next.completedAt
+  );
+}
+
+function restoreReadingProgressForCurrentDoc() {
+  const progress = getReadingProgress(state.selectedPath);
+  const targetScrollY = progress?.scrollY || 0;
+  const shouldRetryRestore = targetScrollY > 0;
+  const restore = () => {
+    const maxScrollY = getMaxWindowScroll();
+    window.scrollTo({
+      top: clampNumber(targetScrollY, 0, maxScrollY, 0),
+      behavior: "auto",
+    });
+  };
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      restore();
+      if (!shouldRetryRestore) {
+        recordReadingProgress({ force: true });
+        return;
+      }
+      window.setTimeout(() => {
+        restore();
+        recordReadingProgress({ force: true });
+      }, 200);
+    });
+  });
+}
+
+function getMaxWindowScroll() {
+  return Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+}
+
+function getReadingProgress(path) {
+  return state.readingProgress.get(path) || null;
+}
+
+function getReadingProgressPercent(progress) {
+  return Math.round(progress?.maxPercent || 0);
+}
+
+function roundReadingPercent(percent) {
+  return Math.round(percent * 10) / 10;
+}
+
+function formatReadingProgress(percent) {
+  return percent >= READING_COMPLETE_THRESHOLD ? "完成" : `${percent}%`;
+}
+
+function updateDocProgressUI(progress = getReadingProgress(state.selectedPath)) {
+  const percent = getReadingProgressPercent(progress);
+  elements.docProgress.textContent = `阅读进度 ${formatReadingProgress(percent)}`;
+  elements.docProgress.dataset.progress = String(percent);
+  elements.docProgress.classList.toggle("is-complete", percent >= READING_COMPLETE_THRESHOLD);
+}
+
+function updateDocCount() {
+  if (!state.docs.length) {
+    elements.docCount.textContent = "加载中";
+    return;
+  }
+
+  const completedCount = state.docs.filter((doc) => {
+    const progress = getReadingProgress(doc.path);
+    return getReadingProgressPercent(progress) >= READING_COMPLETE_THRESHOLD;
+  }).length;
+  elements.docCount.textContent = `${state.docs.length} 个文档 · 完成 ${completedCount}`;
 }
 
 function addHeadingIds(container) {
