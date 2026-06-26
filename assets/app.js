@@ -40,7 +40,8 @@ const LLM_SYSTEM_PROMPT = [
   "",
   "输出要求：",
   "- 直接输出中文 Markdown，不要把整段回答包在 ```markdown 代码块里。",
-  "- 公式使用 LaTeX Markdown 写法：行内公式用 `$...$`，独立公式用 `$$...$$`。",
+  "- 公式使用 LaTeX Markdown 写法：行内公式用 `$...$`，独立公式必须把开始和结束的 `$$` 单独放在一行。",
+  "- 标题、分隔线、列表和公式块前后都要保留空行；不要把 `---`、`###` 或 `$$` 和正文写在同一行。",
   "- 内容要紧凑，避免重复整篇文档。",
   "- 不确定处明确标注，不做假确定。",
 ].join("\n");
@@ -557,10 +558,112 @@ function renderMarkdown(source, doc) {
 }
 
 function renderMarkdownInto(container, source) {
-  const html = marked.parse(source);
+  const html = marked.parse(normalizeMarkdownForRendering(source));
   container.innerHTML = DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
   });
+}
+
+function normalizeMarkdownForRendering(source) {
+  return splitMarkdownCodeFenceSegments(String(source))
+    .map((segment) => (segment.isCode ? segment.text : normalizeMarkdownProse(segment.text)))
+    .join("");
+}
+
+function splitMarkdownCodeFenceSegments(source) {
+  const segments = [];
+  let buffer = "";
+  let inFence = false;
+  let fenceChar = "";
+  let fenceLength = 0;
+  const lines = source.split("\n");
+
+  lines.forEach((line, index) => {
+    const lineWithEnding = index < lines.length - 1 ? `${line}\n` : line;
+    const fence = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+
+    if (!inFence && fence) {
+      pushMarkdownSegment(segments, buffer, false);
+      buffer = lineWithEnding;
+      inFence = true;
+      fenceChar = fence[1][0];
+      fenceLength = fence[1].length;
+      return;
+    }
+
+    if (inFence) {
+      buffer += lineWithEnding;
+      if (fence && fence[1][0] === fenceChar && fence[1].length >= fenceLength) {
+        pushMarkdownSegment(segments, buffer, true);
+        buffer = "";
+        inFence = false;
+        fenceChar = "";
+        fenceLength = 0;
+      }
+      return;
+    }
+
+    buffer += lineWithEnding;
+  });
+
+  pushMarkdownSegment(segments, buffer, inFence);
+  return segments;
+}
+
+function pushMarkdownSegment(segments, text, isCode) {
+  if (text) {
+    segments.push({ text, isCode });
+  }
+}
+
+function normalizeMarkdownProse(source) {
+  return normalizeDisplayMathBlocks(normalizeLooseMarkdownBlocks(source));
+}
+
+function normalizeLooseMarkdownBlocks(source) {
+  return source
+    .replace(/([^\n])\s+---\s+(#{1,6}[ \t]+)/g, "$1\n\n---\n\n$2")
+    .replace(/(^|\n)[ \t]*---[ \t]+(#{1,6}[ \t]+)/g, "$1---\n\n$2");
+}
+
+function normalizeDisplayMathBlocks(source) {
+  const delimiterCount = source.match(/\$\$/g)?.length || 0;
+  if (delimiterCount < 2 || delimiterCount % 2 !== 0) {
+    return source;
+  }
+
+  let normalized = "";
+  let inMathBlock = false;
+  for (let index = 0; index < source.length; index += 1) {
+    if (source.startsWith("$$", index)) {
+      if (inMathBlock) {
+        if (normalized && !normalized.endsWith("\n")) {
+          normalized = normalized.replace(/[ \t]+$/, "");
+          normalized += "\n";
+        }
+        normalized += "$$";
+        if (source[index + 2] && source[index + 2] !== "\n") {
+          normalized += "\n\n";
+        }
+      } else {
+        if (normalized && !normalized.endsWith("\n")) {
+          normalized = normalized.replace(/[ \t]+$/, "");
+          normalized += "\n\n";
+        }
+        normalized += "$$";
+        if (source[index + 2] && source[index + 2] !== "\n") {
+          normalized += "\n";
+        }
+      }
+      inMathBlock = !inMathBlock;
+      index += 1;
+      continue;
+    }
+
+    normalized += source[index];
+  }
+
+  return normalized;
 }
 
 function renderPlainText(source) {
