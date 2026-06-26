@@ -847,7 +847,7 @@ function shouldPersistReadingProgress(previous, next) {
 
 function restoreReadingProgressForCurrentDoc() {
   const progress = getReadingProgress(state.selectedPath);
-  const targetScrollY = progress?.scrollY || 0;
+  const targetScrollY = getScrollYForReadingProgress(progress);
   const shouldRetryRestore = targetScrollY > 0;
   const restore = () => {
     const maxScrollY = getMaxWindowScroll();
@@ -857,19 +857,33 @@ function restoreReadingProgressForCurrentDoc() {
     });
   };
 
+  restore();
+  if (!shouldRetryRestore) {
+    recordReadingProgress({ force: true });
+    return;
+  }
+
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       restore();
-      if (!shouldRetryRestore) {
-        recordReadingProgress({ force: true });
-        return;
-      }
       window.setTimeout(() => {
         restore();
         recordReadingProgress({ force: true });
       }, 200);
     });
   });
+}
+
+function getScrollYForReadingProgress(progress) {
+  const percent = clampNumber(progress?.maxPercent, 0, 100, 0);
+  if (!percent || !elements.content.scrollHeight) {
+    return 0;
+  }
+
+  const scrollY = window.scrollY || window.pageYOffset || 0;
+  const contentTop = scrollY + elements.content.getBoundingClientRect().top;
+  const targetScrollY = contentTop + elements.content.scrollHeight * (percent / 100) - window.innerHeight;
+  return clampNumber(targetScrollY, 0, getMaxWindowScroll(), 0);
 }
 
 function getMaxWindowScroll() {
